@@ -1,0 +1,2308 @@
+// ==UserScript==
+// @name Live DOM-AI-N Assistant (Ultimate)
+// @namespace http://tampermonkey.net/
+// @version 2025-06-23.7 // Increment version for this update
+// @description An incredibly powerful AI assistant that can interact with and automate any webpage using Google Gemini, featuring an extensive suite of 109 DOM manipulation, information retrieval, and browser control tools.
+// @author k0880k
+// @match *://*/*
+// @grant GM_addStyle
+// @grant GM_xmlhttpRequest
+// @grant GM_setValue
+// @grant GM_getValue
+// @grant GM_deleteValue
+// @grant GM_setClipboard
+// @grant GM_getClipboard
+// @grant GM_notification
+// @grant GM_download
+// @grant GM_listValues
+// @connect generativelanguage.googleapis.com
+// @connect *
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // --- 1. INJECT HTML & CSS ---
+    const assistantHTML = `
+        <div class="dom-ai-assistant" id="domAiAssistant">
+            <div class="dom-ai-header" id="domAiHeader">
+                <span>DOM-AI Assistant</span>
+                <div class="dom-ai-header-buttons">
+                    <button id="settingsBtn" title="Settings">⚙️</button>
+                    <button id="listToolsBtn" title="List Available Tools">🛠️</button>
+                    <button id="clearChatBtn" title="Clear Chat">🧹</button>
+                    <button id="minimizeBtn" title="Minimize">－</button>
+                    <button id="closeBtn" title="Close">✕</button>
+                </div>
+            </div>
+            <div class="dom-ai-content" id="domAiContent">
+                <div class="dom-ai-messages" id="domAiMessages"></div>
+                <div class="dom-ai-input-container">
+                    <input type="text" class="dom-ai-input" id="domAiInput" placeholder="e.g., Make all buttons green">
+                    <div class="dom-ai-tools">
+                        <button class="dom-ai-tool-btn" id="inspectBtn">Inspect Element</button>
+                    </div>
+                </div>
+            </div>
+            <div class="settings-modal" id="settingsModal">
+                <div class="settings-content">
+                    <label for="apiKeyInput">Gemini API Key</label>
+                    <p style="font-size: 12px; color: #9ca3af; margin-bottom: 12px;">Your key is stored locally and securely by Tampermonkey.</p>
+                    <input type="password" class="dom-ai-input" id="apiKeyInput" placeholder="Enter your API key here">
+                    <button id="saveApiKeyBtn">Save and Close</button>
+                    <button id="clearApiKeyBtn" class="danger">Clear API Key</button>
+                </div>
+            </div>
+        </div>
+        <div class="highlight-box" id="highlightBox" style="display: none;"></div>
+    `;
+
+    const assistantCSS = `
+        /* Basic CSS Reset & Fonts */
+        .dom-ai-assistant, .dom-ai-assistant * {
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        }
+
+        /* Main Assistant Container */
+        .dom-ai-assistant {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 420px;
+            height: 650px;
+            background: #111827;
+            color: #f9fafb;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            display: flex;
+            flex-direction: column;
+            z-index: 2147483647;
+            border: 1px solid #374151;
+            overflow: hidden;
+            resize: both;
+            min-width: 300px;
+            min-height: 400px;
+        }
+
+        .dom-ai-assistant.minimized {
+            height: 50px;
+            width: 220px;
+            resize: none;
+        }
+
+        /* Header */
+        .dom-ai-header {
+            padding: 12px 16px;
+            background: #1f2937;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: grab;
+            border-bottom: 1px solid #374151;
+        }
+
+        .dom-ai-header:active {
+            cursor: grabbing;
+        }
+
+        .dom-ai-header span {
+            font-weight: 600;
+        }
+
+        .dom-ai-header-buttons button {
+            background: none;
+            border: none;
+            color: #9ca3af;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 4px;
+        }
+
+        .dom-ai-header-buttons button:hover {
+            color: #f9fafb;
+        }
+
+        /* Content Area */
+        .dom-ai-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .dom-ai-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        /* Messages */
+        .message {
+            display: flex;
+            margin-bottom: 16px;
+            max-width: 95%;
+            line-height: 1.6;
+        }
+
+        .message-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #374151;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+
+        .message-content {
+            padding: 12px 16px;
+            border-radius: 12px;
+            word-wrap: break-word;
+        }
+
+        .user-message {
+            margin-left: auto;
+            flex-direction: row-reverse;
+        }
+
+        .user-message .message-icon {
+            margin-left: 12px;
+            margin-right: 0;
+            background: #4f46e5;
+        }
+
+        .user-message .message-content {
+            background: #4f46e5;
+            border-radius: 12px 12px 2px 12px;
+        }
+
+        .ai-message .message-content {
+            background: #1f2937;
+            border-radius: 12px 12px 12px 2px;
+        }
+
+        .ai-message .thinking-indicator span {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #9ca3af;
+            margin: 0 2px;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+
+        .ai-message .thinking-indicator span:nth-child(1) {
+            animation-delay: -0.32s;
+        }
+
+        .ai-message .thinking-indicator span:nth-child(2) {
+            animation-delay: -0.16s;
+        }
+
+        @keyframes bounce {
+            0%, 80%, 100% {
+                transform: scale(0);
+            }
+            40% {
+                transform: scale(1.0);
+            }
+        }
+
+        /* Tool Call/Result Specific Styles */
+        .message-content pre {
+            background-color: #2d3748;
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+            font-size: 0.875em;
+            color: #e2e8f0;
+            border: 1px solid #4b5563;
+        }
+
+        .tool-call .message-content {
+            border: 1px solid #6366f1;
+            background-color: #2a2e46;
+        }
+
+        .tool-result .message-content {
+            border: 1px solid #10b981;
+            background-color: #1c3e35;
+        }
+
+        .tool-error .message-content {
+            border: 1px solid #ef4444;
+            background-color: #4a2a2a;
+        }
+
+        /* Input Area */
+        .dom-ai-input-container {
+            padding: 12px;
+            border-top: 1px solid #374151;
+            background: #1f2937;
+        }
+
+        .dom-ai-input {
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid #4b5563;
+            outline: none;
+            background: #374151;
+            color: #f9fafb;
+        }
+
+        .dom-ai-input:focus {
+            border-color: #4f46e5;
+        }
+
+        .dom-ai-tools {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .dom-ai-tool-btn {
+            padding: 6px 12px;
+            background: #374151;
+            color: #d1d5db;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .dom-ai-tool-btn:hover {
+            background: #4f46e5;
+            color: white;
+        }
+
+        /* Highlight & Settings Modal */
+        .highlight-box {
+            position: absolute;
+            border: 3px dashed #f43f5e;
+            background: rgba(244, 63, 94, 0.2);
+            pointer-events: none;
+            z-index: 2147483646;
+            transition: all 0.1s;
+            border-radius: 4px;
+        }
+
+        .settings-modal {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(17, 24, 39, 0.8);
+            backdrop-filter: blur(5px);
+            z-index: 10;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .settings-content {
+            background: #1f2937;
+            padding: 24px;
+            border-radius: 12px;
+            border: 1px solid #374151;
+            width: 90%;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .settings-content label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            text-align: left;
+        }
+
+        .settings-content p {
+            text-align: left;
+        }
+
+        .settings-content input {
+            width: 100%;
+            margin-bottom: 12px;
+            background: #374151;
+        }
+
+        .settings-content button {
+            width: 100%;
+            padding: 10px;
+            background: #4f46e5;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+
+        .settings-content button.danger {
+            background: #dc2626;
+        }
+
+        /* Corrected highlight style to use CSS variable */
+        .dom-ai-highlight {
+            background-color: var(--highlight-color, yellow);
+            padding: 1px 0;
+            display: inline;
+            border-radius: 2px;
+        }
+
+        /* Styles for the tools list display */
+        .tools-list {
+            font-size: 0.9em;
+            background-color: #1f2937;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 10px;
+            max-height: 400px; /* Limit height for scrollability */
+            overflow-y: auto;
+            color: #d1d5db; /* Ensure text is visible */
+        }
+
+        .tools-list h3 {
+            color: #6366f1;
+            margin-top: 15px;
+            margin-bottom: 5px;
+            border-bottom: 1px solid #374151;
+            padding-bottom: 5px;
+            font-size: 1.1em;
+        }
+
+        .tools-list ul {
+            list-style: none;
+            padding-left: 0;
+            margin-top: 5px;
+        }
+
+        .tools-list li {
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px dashed #2d3748;
+        }
+
+        .tools-list li:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .tools-list strong {
+            color: #10b981;
+            font-size: 1em;
+            display: block; /* Make tool name a block for better spacing */
+            margin-bottom: 3px;
+        }
+
+        .tools-list .tool-description {
+            color: #9ca3af;
+            font-size: 0.85em;
+            margin-top: 2px;
+        }
+
+        .tools-list .tool-params {
+            font-size: 0.8em;
+            color: #9ca3af;
+            margin-top: 5px;
+            padding-left: 10px;
+            border-left: 2px solid #4f46e5;
+        }
+        .tools-list .tool-params ul {
+            list-style: disc; /* Use discs for parameter list */
+            padding-left: 20px;
+            margin-top: 5px;
+        }
+        .tools-list .tool-params li {
+            margin-bottom: 2px;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+        .tools-list .tool-params strong {
+            display: inline; /* For parameter names */
+            color: #d1d5db;
+        }
+
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', assistantHTML);
+    GM_addStyle(assistantCSS);
+
+    // --- 2. SCRIPT LOGIC ---
+    const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent';
+    let apiKey = GM_getValue('domAiApiKey', null);
+    let inspectMode = false;
+    let chatHistory = []; // Stores conversation turns for Gemini API
+    let isPrimed = false; // Flag to ensure system instruction is added only once
+
+    // UI ELEMENTS
+    const assistant = document.getElementById('domAiAssistant'),
+        header = document.getElementById('domAiHeader'),
+        messagesContainer = document.getElementById('domAiMessages'),
+        input = document.getElementById('domAiInput'),
+        inspectBtn = document.getElementById('inspectBtn'),
+        minimizeBtn = document.getElementById('minimizeBtn'),
+        closeBtn = document.getElementById('closeBtn'),
+        clearChatBtn = document.getElementById('clearChatBtn'),
+        settingsBtn = document.getElementById('settingsBtn'),
+        settingsModal = document.getElementById('settingsModal'),
+        apiKeyInput = document.getElementById('apiKeyInput'),
+        saveApiKeyBtn = document.getElementById('saveApiKeyBtn'),
+        clearApiKeyBtn = document.getElementById('clearApiKeyBtn'),
+        highlightBox = document.getElementById('highlightBox'),
+        listToolsBtn = document.getElementById('listToolsBtn'); // Get reference to the new button
+
+    // UTILITY FUNCTIONS
+    function getSelector(el) {
+        if (!el || el === document.body || el === document.documentElement) {
+            return el ? el.tagName.toLowerCase() : '';
+        }
+        if (el.id) return `#${el.id}`;
+
+        const path = [];
+        while (el && el.nodeType === Node.ELEMENT_NODE) {
+            let selector = el.tagName.toLowerCase();
+
+            // Add classes, but filter out dynamic/unstable ones (e.g., from CSS-in-JS or frameworks)
+            if (el.className && typeof el.className === 'string') {
+                const stableClasses = el.className.split(' ').filter(c => c && !c.match(/[^a-zA-Z0-9_-]/)).join('.');
+                if (stableClasses) selector += `.${stableClasses}`;
+            }
+
+            let siblingIndex = 1;
+            let hasSimilarSiblings = false;
+            let tempEl = el;
+            while (tempEl.previousElementSibling) {
+                tempEl = tempEl.previousElementSibling;
+                if (tempEl.tagName === el.tagName) {
+                    hasSimilarSiblings = true;
+                    siblingIndex++;
+                }
+            }
+            if (!hasSimilarSiblings) { // Check next siblings too to confirm if :nth-of-type is truly needed
+                tempEl = el;
+                while (tempEl.nextElementSibling) {
+                    tempEl = tempEl.nextElementSibling;
+                    if (tempEl.tagName === el.tagName) {
+                        hasSimilarSiblings = true;
+                        break;
+                    }
+                }
+            }
+
+            if (hasSimilarSiblings) selector += `:nth-of-type(${siblingIndex})`;
+
+            path.unshift(selector);
+            el = el.parentElement;
+        }
+        return path.join(' > ');
+    }
+
+    function isElementVisible(el) {
+        if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) return false;
+        const rect = el.getBoundingClientRect();
+        // Check if element is within the viewport (or very close to it) and has dimensions
+        return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+    }
+
+    // --- AI TOOLS DEFINITIONS ---
+    const tools = {
+        // Core Interaction & DOM Manipulation
+        answerToUser: (text) => {
+            addMessage(text, 'ai');
+            return { success: true, message: "Answered user." };
+        },
+        clickElement: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.click();
+                return { success: true, message: `Clicked element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        changeElementStyle: (selector, property, value) => {
+            const elements = document.querySelectorAll(selector);
+            if (elements.length > 0) {
+                elements.forEach(el => el.style[property] = value);
+                return { success: true, message: `Style '${property}: ${value}' changed for ${elements.length} elements with selector: ${selector}.` };
+            }
+            return { success: false, message: `No elements found for selector: ${selector}.` };
+        },
+        setElementValue: (selector, value) => {
+            const el = document.querySelector(selector);
+            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) {
+                el.value = value;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return { success: true, message: `Value set to '${value}' for element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found or not an input/textarea/select for selector: ${selector}.` };
+        },
+        typeText: async (selector, text, delay = 50) => {
+            const el = document.querySelector(selector);
+            if (!el || (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA')) {
+                return { success: false, message: `Element not found or not a typeable input/textarea for selector: ${selector}.` };
+            }
+            el.focus();
+            for (let i = 0; i < text.length; i++) {
+                el.value += text[i];
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                await new Promise(r => setTimeout(r, delay));
+            }
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return { success: true, message: `Typed text into element with selector: ${selector}.` };
+        },
+        modifyTextContent: (selector, newText) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.textContent = newText;
+                return { success: true, message: `Text content modified for element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        replaceElementContent: (selector, newContent) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.innerHTML = newContent;
+                return { success: true, message: `Content replaced for element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        removeElement: (selector) => {
+            const el = document.querySelector(selector);
+            if (el && el.parentNode) {
+                el.parentNode.removeChild(el);
+                return { success: true, message: `Element removed with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found or no parent for selector: ${selector}.` };
+        },
+        addRemoveClass: (selector, className, action) => {
+            const elements = document.querySelectorAll(selector);
+            if (elements.length > 0) {
+                elements.forEach(el => {
+                    if (action === 'add') el.classList.add(className);
+                    else if (action === 'remove') el.classList.remove(className);
+                });
+                return { success: true, message: `${action === 'add' ? 'Added' : 'Removed'} class '${className}' for ${elements.length} elements with selector: ${selector}.` };
+            }
+            return { success: false, message: `No elements found for selector: ${selector}.` };
+        },
+        selectOption: (selector, value) => {
+            const selectEl = document.querySelector(selector);
+            if (selectEl && selectEl.tagName === 'SELECT') {
+                const option = selectEl.querySelector(`option[value="${value}"]`);
+                if (option) {
+                    selectEl.value = value;
+                    selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+                    return { success: true, message: `Option '${value}' selected for dropdown with selector: ${selector}.` };
+                }
+                return { success: false, message: `Option with value '${value}' not found in select element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Select element not found or not a <select> for selector: ${selector}.` };
+        },
+        toggleCheckboxRadio: (selector, checked) => {
+            const el = document.querySelector(selector);
+            if (el && (el.type === 'checkbox' || el.type === 'radio')) {
+                el.checked = checked;
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return { success: true, message: `Checkbox/radio with selector '${selector}' set to checked: ${checked}.` };
+            }
+            return { success: false, message: `Element not found or not a checkbox/radio for selector: ${selector}.` };
+        },
+        submitForm: (selector) => {
+            const form = document.querySelector(selector);
+            if (form && form.tagName === 'FORM') {
+                form.submit();
+                return { success: true, message: `Form submitted with selector: ${selector}.` };
+            }
+            return { success: false, message: `Form not found or not a form element for selector: ${selector}.` };
+        },
+        resetForm: (selector) => {
+            const form = document.querySelector(selector);
+            if (form && form.tagName === 'FORM') {
+                form.reset();
+                return { success: true, message: `Form reset for selector: ${selector}.` };
+            }
+            return { success: false, message: `Form not found or not a form element for selector: ${selector}.` };
+        },
+        clearInput: (selector) => {
+            const el = document.querySelector(selector);
+            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+                el.value = '';
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return { success: true, message: `Input cleared for selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found or not an input/textarea for selector: ${selector}.` };
+        },
+        setAttribute: (selector, attributeName, value) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.setAttribute(attributeName, value);
+                return { success: true, message: `Attribute '${attributeName}' set to '${value}' for selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        removeAttribute: (selector, attributeName) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.removeAttribute(attributeName);
+                return { success: true, message: `Attribute '${attributeName}' removed for selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        hoverElement: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+                return { success: true, message: `Hovered over element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        focusElement: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.focus();
+                return { success: true, message: `Focused element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        simulateRightClick: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: el.getBoundingClientRect().left, clientY: el.getBoundingClientRect().top }));
+                return { success: true, message: `Simulated right-click on element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        doubleClickElement: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 }));
+                return { success: true, message: `Double-clicked element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        triggerEvent: (selector, eventType, eventInit = {}) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                const event = new Event(eventType, { bubbles: true, cancelable: true, ...eventInit });
+                el.dispatchEvent(event);
+                return { success: true, message: `Triggered '${eventType}' event on element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        injectCSS: (cssString) => {
+            try {
+                GM_addStyle(cssString);
+                return { success: true, message: `Injected CSS successfully.` };
+            } catch (e) {
+                return { success: false, message: `Error injecting CSS: ${e.message}` };
+            }
+        },
+        injectScript: (scriptContent) => {
+            try {
+                const script = document.createElement('script');
+                script.textContent = scriptContent;
+                document.head.appendChild(script);
+                return { success: true, message: `Injected script successfully.` };
+            } catch (e) {
+                return { success: false, message: `Error injecting script: ${e.message}` };
+            }
+        },
+        insertHtml: (selector, position, htmlContent) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                try {
+                    el.insertAdjacentHTML(position, htmlContent);
+                    return { success: true, message: `Inserted HTML '${position}' for selector: ${selector}.` };
+                } catch (e) {
+                    return { success: false, message: `Error inserting HTML: ${e.message}` };
+                }
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        replaceElement: (selector, newHtmlContent) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                try {
+                    el.outerHTML = newHtmlContent;
+                    return { success: true, message: `Replaced element with selector: ${selector}.` };
+                } catch (e) {
+                    return { success: false, message: `Error replacing element: ${e.message}` };
+                }
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        clearAllInputs: () => {
+            const inputs = document.querySelectorAll('input:not([type="hidden"]):not([readonly]):not([disabled]), textarea:not([readonly]):not([disabled])');
+            let clearedCount = 0;
+            inputs.forEach(el => {
+                if (isElementVisible(el)) {
+                    el.value = '';
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    clearedCount++;
+                }
+            });
+            return { success: true, message: `Cleared ${clearedCount} visible input/textarea elements.` };
+        },
+        clickCoordinates: (x, y) => {
+            const el = document.elementFromPoint(x, y);
+            if (el) {
+                el.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }));
+                return { success: true, message: `Clicked at coordinates (${x}, ${y}). Element clicked: ${getSelector(el)}` };
+            }
+            return { success: false, message: `No clickable element found at coordinates (${x}, ${y}).` };
+        },
+        insertTextAtCursor: (text) => {
+            const activeEl = document.activeElement;
+            if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+                const start = activeEl.selectionStart;
+                const end = activeEl.selectionEnd;
+                activeEl.value = activeEl.value.substring(0, start) + text + activeEl.value.substring(end);
+                activeEl.selectionStart = activeEl.selectionEnd = start + text.length;
+                activeEl.dispatchEvent(new Event('input', { bubbles: true }));
+                activeEl.dispatchEvent(new Event('change', { bubbles: true }));
+                return { success: true, message: `Inserted text into active element at cursor.` };
+            }
+            // Fallback if no specific element is focused, try to find the first visible input
+            const firstInput = document.querySelector('input:not([type="hidden"]):not([readonly]):not([disabled]), textarea:not([readonly]):not([disabled])');
+            if (firstInput && isElementVisible(firstInput)) {
+                firstInput.value += text;
+                firstInput.dispatchEvent(new Event('input', { bubbles: true }));
+                firstInput.dispatchEvent(new Event('change', { bubbles: true }));
+                return { success: true, message: `Appended text to the first visible input field.` };
+            }
+            return { success: false, message: `No active or visible input/textarea found to insert text.` };
+        },
+        simulateDragAndDrop: async (sourceSelector, targetSelector, delay = 100) => {
+            const source = document.querySelector(sourceSelector);
+            const target = document.querySelector(targetSelector);
+            if (!source) return { success: false, message: `Source element not found for selector: ${sourceSelector}.` };
+            if (!target) return { success: false, message: `Target element not found for selector: ${targetSelector}.` };
+
+            const sourceRect = source.getBoundingClientRect();
+            const targetRect = target.getBoundingClientRect();
+
+            const clientX = sourceRect.left + sourceRect.width / 2;
+            const clientY = sourceRect.top + sourceRect.height / 2;
+            const targetClientX = targetRect.left + targetRect.width / 2;
+            const targetClientY = targetRect.top + targetRect.height / 2;
+
+            function dispatchMouseEvent(element, type, cx, cy) {
+                element.dispatchEvent(new MouseEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX: cx,
+                    clientY: cy,
+                    button: 0 // Left mouse button
+                }));
+            }
+
+            dispatchMouseEvent(source, 'mousedown', clientX, clientY);
+            await new Promise(r => setTimeout(r, delay));
+            dispatchMouseEvent(document, 'mousemove', targetClientX, targetClientY); // Mousemove on document for global drag
+            await new Promise(r => setTimeout(r, delay));
+            dispatchMouseEvent(target, 'mouseup', targetClientX, targetClientY);
+            dispatchMouseEvent(target, 'click', targetClientX, targetClientY); // Often a click follows a successful drop
+            return { success: true, message: `Simulated drag from ${sourceSelector} to ${targetSelector}.` };
+        },
+        scrollElementBy: (selector, x, y, behavior = 'smooth') => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.scrollBy({ left: x, top: y, behavior: behavior });
+                return { success: true, message: `Scrolled element ${selector} by X:${x}, Y:${y}.` };
+            }
+            return { success: false, message: `Element not found or not scrollable for selector: ${selector}.` };
+        },
+        addElement: (parentSelector, tagName, attributes = {}, innerHTML = '', position = 'beforeend') => {
+            const parentEl = document.querySelector(parentSelector);
+            if (!parentEl) {
+                return { success: false, message: `Parent element not found for selector: ${parentSelector}.` };
+            }
+            try {
+                const newEl = document.createElement(tagName);
+                for (const attr in attributes) {
+                    if (Object.prototype.hasOwnProperty.call(attributes, attr)) {
+                        newEl.setAttribute(attr, attributes[attr]);
+                    }
+                }
+                newEl.innerHTML = innerHTML;
+                parentEl.insertAdjacentElement(position, newEl);
+                return { success: true, message: `Added <${tagName}> element to ${parentSelector} at ${position}.` };
+            } catch (e) {
+                return { success: false, message: `Error adding element: ${e.message}` };
+            }
+        },
+        setElementVisibility: (selector, visible) => {
+            const elements = document.querySelectorAll(selector);
+            if (elements.length === 0) {
+                return { success: false, message: `No elements found for selector: ${selector}.` };
+            }
+            elements.forEach(el => {
+                el.style.display = visible ? '' : 'none'; // Set to default display or 'none'
+            });
+            return { success: true, message: `Set visibility to ${visible} for ${elements.length} elements with selector: ${selector}.` };
+        },
+        disableElement: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.setAttribute('disabled', 'true');
+                return { success: true, message: `Disabled element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        enableElement: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.removeAttribute('disabled');
+                return { success: true, message: `Enabled element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+
+        // Information Retrieval
+        getSimplifiedDom: () => {
+            const interactiveElements = 'a, button, input:not([type="hidden"]), textarea, select, [role="button"], [role="link"], [tabindex]:not([tabindex="-1"])';
+            const contentElements = 'h1, h2, h3, h4, h5, h6, p, li, img, strong, em, b, i, span, div, table, iframe'; // Added iframe
+            const elements = Array.from(document.querySelectorAll(`${interactiveElements}, ${contentElements}`));
+            const domInfo = [];
+            let elementCount = 0;
+            const maxElements = 100;
+
+            for (const el of elements) {
+                if (!isElementVisible(el) || assistant.contains(el) || highlightBox.contains(el)) {
+                    continue;
+                }
+                const selector = getSelector(el);
+                if (!selector) continue;
+
+                const info = { tagName: el.tagName.toLowerCase(), selector: selector };
+                if (el.id) info.id = el.id;
+                if (el.className && typeof el.className === 'string') {
+                    const stableClasses = el.className.split(' ').filter(c => c && !c.match(/[^a-zA-Z0-9_-]/)).join('.');
+                    if (stableClasses) info.className = stableClasses;
+                }
+                const textContent = (el.value !== undefined && ['input', 'textarea', 'select'].includes(el.tagName.toLowerCase())) ? el.value : el.textContent;
+                if (textContent && textContent.trim().length > 0) {
+                    info.text = textContent.trim().substring(0, 100);
+                }
+                if (el.title) info.title = el.title;
+                if (el.dataset && el.dataset.testid) info.dataTestId = el.dataset.testid;
+                if (el.tagName === 'A' && el.href) info.href = el.href;
+                if (el.tagName === 'IMG' && el.src) {
+                    info.src = el.src;
+                    if (el.alt) info.alt = el.alt;
+                }
+                if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+                    if (el.value) info.value = el.value;
+                    if (el.placeholder) info.placeholder = el.placeholder;
+                    if (el.type) info.type = el.type;
+                    if (el.name) info.name = el.name;
+                    if (el.checked !== undefined) info.checked = el.checked;
+                    if (el.disabled !== undefined) info.disabled = el.disabled; // Added disabled state
+                }
+                if (el.hasAttribute('aria-label')) info.ariaLabel = el.getAttribute('aria-label');
+                if (el.hasAttribute('role')) info.role = el.getAttribute('role');
+
+                const rect = el.getBoundingClientRect();
+                info.size = `${Math.round(rect.width)}x${Math.round(rect.height)}`;
+
+                domInfo.push(info);
+                elementCount++;
+                if (elementCount >= maxElements) break;
+            }
+            return { success: true, dom: JSON.stringify(domInfo, null, 2), message: `Simplified DOM of ${domInfo.length} elements retrieved. Note: Selectors generated may be brittle on websites using dynamic class names (e.g., React, Vue, Svelte).` };
+        },
+        getElementText: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                const text = el.textContent.trim();
+                return { success: true, text: text.substring(0, 500), message: `Text retrieved for selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getElementAttribute: (selector, attributeName) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                const attr = el.getAttribute(attributeName);
+                return { success: true, value: attr ? attr.substring(0, 500) : null, message: `Attribute '${attributeName}' retrieved for selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getElementAttributes: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                const attributes = {};
+                Array.from(el.attributes).forEach(attr => {
+                    attributes[attr.name] = attr.value;
+                });
+                return { success: true, attributes: attributes, message: `All attributes retrieved for selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getAllLinks: () => {
+            const links = Array.from(document.querySelectorAll('a[href]'))
+                .filter(el => isElementVisible(el))
+                .slice(0, 50)
+                .map(link => ({ text: link.textContent.trim().substring(0, 100), href: link.href }));
+            return { success: true, links: links, message: `Retrieved ${links.length} visible links.` };
+        },
+        getAllImages: () => {
+            const images = Array.from(document.querySelectorAll('img'))
+                .filter(el => isElementVisible(el))
+                .slice(0, 50)
+                .map(img => ({ src: img.src, alt: img.alt, width: img.width, height: img.height, selector: getSelector(img) }));
+            return { success: true, images: images, message: `Retrieved ${images.length} visible images.` };
+        },
+        getPageTitle: () => {
+            return { success: true, title: document.title, message: `Page title retrieved: "${document.title}".` };
+        },
+        getPageURL: () => {
+            return { success: true, url: window.location.href, message: `Page URL retrieved: "${window.location.href}".` };
+        },
+        getElementComputedStyle: (selector, propertyName) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                const style = window.getComputedStyle(el);
+                const value = style.getPropertyValue(propertyName);
+                return { success: true, value: value, message: `Computed style for '${propertyName}' retrieved for selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getVisibleTextContent: () => {
+            const textNodes = [];
+            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+            let node;
+            while ((node = walker.nextNode())) {
+                if (node.nodeValue.trim().length > 0 && isElementVisible(node.parentElement) && !assistant.contains(node.parentElement)) {
+                    textNodes.push(node.nodeValue.trim());
+                }
+            }
+            const fullText = textNodes.join('\n').substring(0, 1000);
+            return { success: true, text: fullText, message: `Visible text content retrieved.` };
+        },
+        getElementBoundingRect: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                const rect = el.getBoundingClientRect();
+                return { success: true, rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left }, message: `Bounding rect retrieved for selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getElementOffset: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                const rect = el.getBoundingClientRect();
+                return { success: true, offset: { top: rect.top + window.scrollY, left: rect.left + window.scrollX }, message: `Offset retrieved for selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getElementScrollPosition: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                return { success: true, scroll: { top: el.scrollTop, left: el.scrollLeft }, message: `Scroll position retrieved for element: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getFormValues: (selector) => {
+            const form = document.querySelector(selector);
+            if (form && form.tagName === 'FORM') {
+                const formData = {};
+                Array.from(form.elements).forEach(el => {
+                    if (el.name && el.type !== 'submit' && el.type !== 'button' && el.tagName !== 'FIELDSET') {
+                        if (el.type === 'checkbox' || el.type === 'radio') {
+                            formData[el.name] = el.checked;
+                        } else {
+                            formData[el.name] = el.value;
+                        }
+                    }
+                });
+                return { success: true, values: formData, message: `Form values retrieved for selector: ${selector}.` };
+            }
+            return { success: false, message: `Form not found or not a form element for selector: ${selector}.` };
+        },
+        getSelectOptions: (selector) => {
+            const selectEl = document.querySelector(selector);
+            if (selectEl && selectEl.tagName === 'SELECT') {
+                const options = Array.from(selectEl.options).map(option => ({ text: option.text, value: option.value, selected: option.selected }));
+                return { success: true, options: options, message: `Options retrieved for select element: ${selector}.` };
+            }
+            return { success: false, message: `Select element not found or not a <select> for selector: ${selector}.` };
+        },
+        getElementChildren: (selector, maxChildren = 10) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                const children = Array.from(el.children)
+                    .slice(0, maxChildren)
+                    .map(child => ({ tagName: child.tagName.toLowerCase(), selector: getSelector(child), text: child.textContent.trim().substring(0, 50) }));
+                return { success: true, children: children, message: `Retrieved ${children.length} children for selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getMetaTags: () => {
+            const metaTags = Array.from(document.querySelectorAll('head meta')).map(meta => {
+                const attributes = {};
+                Array.from(meta.attributes).forEach(attr => {
+                    attributes[attr.name] = attr.value;
+                });
+                return attributes;
+            });
+            return { success: true, metaTags: metaTags, message: `Retrieved ${metaTags.length} meta tags.` };
+        },
+        getGeolocation: async () => {
+            return new Promise((resolve) => {
+                if ("geolocation" in navigator) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            resolve({ success: true, coords: { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy }, message: `Geolocation retrieved.` });
+                        },
+                        (error) => {
+                            resolve({ success: false, message: `Geolocation error: ${error.message}` });
+                        },
+                        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+                    );
+                } else {
+                    resolve({ success: false, message: `Geolocation is not supported by this browser.` });
+                }
+            });
+        },
+        getUserAgent: () => {
+            return { success: true, userAgent: navigator.userAgent, message: `User agent retrieved.` };
+        },
+        getAllCookies: () => {
+            const cookies = document.cookie.split(';').map(cookie => {
+                const parts = cookie.split('=');
+                const name = decodeURIComponent(parts.shift().trim());
+                const value = decodeURIComponent(parts.join('=').trim());
+                return { name, value };
+            });
+            return { success: true, cookies: cookies, message: `Retrieved ${cookies.length} cookies.` };
+        },
+        getLocalStorageKeys: () => {
+            const keys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                keys.push(localStorage.key(i));
+            }
+            return { success: true, keys: keys, message: `Retrieved ${keys.length} localStorage keys.` };
+        },
+        getSessionStorageKeys: () => {
+            const keys = [];
+            for (let i = 0; i < sessionStorage.length; i++) {
+                keys.push(sessionStorage.key(i));
+            }
+            return { success: true, keys: keys, message: `Retrieved ${keys.length} sessionStorage keys.` };
+        },
+        getHeaders: (level = null) => {
+            let selector = 'h1, h2, h3, h4, h5, h6';
+            if (level && level >= 1 && level <= 6) {
+                selector = `h${level}`;
+            }
+            const headers = Array.from(document.querySelectorAll(selector))
+                .filter(el => isElementVisible(el))
+                .map(el => ({ tagName: el.tagName.toLowerCase(), text: el.textContent.trim().substring(0, 200), selector: getSelector(el) }));
+            return { success: true, headers: headers, message: `Retrieved ${headers.length} heading elements.` };
+        },
+        getTableData: (selector) => {
+            const table = document.querySelector(selector);
+            if (!table || table.tagName !== 'TABLE') {
+                return { success: false, message: `Element not found or not a table for selector: ${selector}.` };
+            }
+            const data = [];
+            const rows = table.querySelectorAll('tr');
+            rows.forEach(row => {
+                const rowData = [];
+                const cells = row.querySelectorAll('th, td');
+                cells.forEach(cell => {
+                    rowData.push(cell.textContent.trim());
+                });
+                data.push(rowData);
+            });
+            return { success: true, data: data, message: `Table data retrieved for selector: ${selector}.` };
+        },
+        checkElementExists: (selector) => {
+            const exists = document.querySelector(selector) !== null;
+            return { success: true, exists: exists, message: `Element existence checked for selector: ${selector}.` };
+        },
+        getFormInputs: (selector) => {
+            const form = document.querySelector(selector);
+            if (form && form.tagName === 'FORM') {
+                const inputs = Array.from(form.querySelectorAll('input:not([type="hidden"]), textarea, select')).map(el => ({ tagName: el.tagName.toLowerCase(), type: el.type || '', name: el.name || '', value: el.value || '', placeholder: el.placeholder || '', selector: getSelector(el) }));
+                return { success: true, inputs: inputs, message: `Retrieved ${inputs.length} form inputs for selector: ${selector}.` };
+            }
+            return { success: false, message: `Form not found for selector: ${selector}.` };
+        },
+        getOuterHTML: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                return { success: true, html: el.outerHTML, message: `Outer HTML retrieved for selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getViewportDimensions: () => {
+            return { success: true, width: window.innerWidth, height: window.innerHeight, message: `Viewport dimensions retrieved.` };
+        },
+        getDocumentDimensions: () => {
+            return { success: true, width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight, message: `Document dimensions retrieved.` };
+        },
+        getSelectionText: () => {
+            const selectedText = window.getSelection().toString();
+            return { success: true, text: selectedText, message: `Selected text retrieved.` };
+        },
+        setPageTitle: (newTitle) => {
+            document.title = newTitle;
+            return { success: true, message: `Page title set to: "${newTitle}".` };
+        },
+        getIframeSources: () => {
+            const iframes = Array.from(document.querySelectorAll('iframe'))
+                .filter(el => isElementVisible(el))
+                .map(iframe => ({ src: iframe.src, name: iframe.name || iframe.id || '', selector: getSelector(iframe) }));
+            return { success: true, iframes: iframes, message: `Retrieved ${iframes.length} visible iframes.` };
+        },
+        getLoadedScripts: () => {
+            const scripts = Array.from(document.querySelectorAll('script[src]'))
+                .map(script => ({ src: script.src, async: script.async, defer: script.defer, selector: getSelector(script) }));
+            return { success: true, scripts: scripts, message: `Retrieved ${scripts.length} external scripts.` };
+        },
+        getLoadedStylesheets: () => {
+            const stylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"][href]'))
+                .map(link => ({ href: link.href, media: link.media, selector: getSelector(link) }));
+            return { success: true, stylesheets: stylesheets, message: `Retrieved ${stylesheets.length} stylesheets.` };
+        },
+        isElementChecked: (selector) => {
+            const el = document.querySelector(selector);
+            if (el && (el.type === 'checkbox' || el.type === 'radio')) {
+                return { success: true, checked: el.checked, message: `Element ${selector} checked status: ${el.checked}.` };
+            }
+            return { success: false, message: `Element not found or not a checkbox/radio for selector: ${selector}.` };
+        },
+        isElementDisabled: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                return { success: true, disabled: el.disabled, message: `Element ${selector} disabled status: ${el.disabled}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        isElementFocused: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                const focused = (document.activeElement === el);
+                return { success: true, focused: focused, message: `Element ${selector} focused status: ${focused}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getScrollHeight: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                return { success: true, scrollHeight: el.scrollHeight, message: `Scroll height of ${selector}: ${el.scrollHeight}px.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getScrollWidth: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                return { success: true, scrollWidth: el.scrollWidth, message: `Scroll width of ${selector}: ${el.scrollWidth}px.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getBrowserInfo: () => {
+            const userAgent = navigator.userAgent;
+            let browserName = "Unknown";
+            let browserVersion = "Unknown";
+
+            if (userAgent.includes("Firefox")) {
+                browserName = "Firefox";
+                browserVersion = userAgent.match(/Firefox\/([0-9.]+)/)?.[1] || "Unknown";
+            } else if (userAgent.includes("Opera") || userAgent.includes("Opr")) {
+                browserName = "Opera";
+                browserVersion = userAgent.match(/(Opera|Opr)\/([0-9.]+)/)?.[2] || "Unknown";
+            } else if (userAgent.includes("Edg")) { // Microsoft Edge (Chromium)
+                browserName = "Edge";
+                browserVersion = userAgent.match(/Edg\/([0-9.]+)/)?.[1] || "Unknown";
+            } else if (userAgent.includes("Chrome")) {
+                browserName = "Chrome";
+                browserVersion = userAgent.match(/Chrome\/([0-9.]+)/)?.[1] || "Unknown";
+            } else if (userAgent.includes("Safari")) {
+                browserName = "Safari";
+                browserVersion = userAgent.match(/Version\/([0-9.]+).*Safari/)?.[1] || "Unknown";
+            } else if (userAgent.includes("MSIE") || userAgent.includes("Trident")) { // Older IE
+                browserName = "Internet Explorer";
+                browserVersion = userAgent.match(/(MSIE |rv:)([0-9.]+)/)?.[2] || "Unknown";
+            }
+
+            return { success: true, name: browserName, version: browserVersion, userAgent: userAgent, message: `Browser info retrieved.` };
+        },
+        getURLParameters: () => {
+            const params = {};
+            const queryString = window.location.search.substring(1);
+            if (queryString) {
+                queryString.split('&').forEach(pair => {
+                    const [key, value] = pair.split('=').map(decodeURIComponent);
+                    params[key] = value;
+                });
+            }
+            return { success: true, parameters: params, message: `URL parameters retrieved.` };
+        },
+
+        // Browser Navigation & Control
+        navigateTo: (url) => {
+            window.location.href = url;
+            return { success: true, message: `Navigated to URL: ${url}.` };
+        },
+        goBack: () => {
+            if (window.history.length > 1) {
+                window.history.back();
+                return { success: true, message: `Navigated back in browser history.` };
+            }
+            return { success: false, message: `No previous page in history to go back to.` };
+        },
+        goForward: () => {
+            window.history.forward();
+            return { success: true, message: `Navigated forward in browser history.` };
+        },
+        reloadPage: () => {
+            window.location.reload();
+            return { success: true, message: `Page reloaded.` };
+        },
+        scrollPage: (direction) => {
+            const scrollAmount = window.innerHeight * 0.8;
+            if (direction === 'down') {
+                window.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+                return { success: true, message: `Scrolled down by ${scrollAmount}px.` };
+            } else if (direction === 'up') {
+                window.scrollBy({ top: -scrollAmount, behavior: 'smooth' });
+                return { success: true, message: `Scrolled up by ${scrollAmount}px.` };
+            }
+            return { success: false, message: `Invalid scroll direction: ${direction}.` };
+        },
+        scrollPageToTop: () => {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            return { success: true, message: `Scrolled page to top.` };
+        },
+        scrollPageToBottom: () => {
+            window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+            return { success: true, message: `Scrolled page to bottom.` };
+        },
+        scrollToElement: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                return { success: true, message: `Scrolled to element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        getScrollPosition: () => {
+            return { success: true, x: window.scrollX, y: window.scrollY, message: `Current window scroll position retrieved.` };
+        },
+        setScrollPosition: (x, y) => {
+            window.scrollTo(x, y);
+            return { success: true, message: `Window scroll position set to X:${x}, Y:${y}.` };
+        },
+        openNewTab: (url) => {
+            window.open(url, '_blank');
+            return { success: true, message: `Opened new tab with URL: ${url}.` };
+        },
+        closeCurrentTab: () => {
+            window.close();
+            return { success: true, message: `Attempted to close current tab.` };
+        },
+        setPageZoom: (zoomLevel) => {
+            if (zoomLevel > 0.1 && zoomLevel < 5) { // Reasonable zoom limits
+                document.body.style.zoom = zoomLevel;
+                return { success: true, message: `Page zoom set to ${zoomLevel * 100}%.` };
+            }
+            return { success: false, message: `Invalid zoom level. Must be between 0.1 and 5.` };
+        },
+        printPage: () => {
+            window.print();
+            return { success: true, message: `Triggered print dialog.` };
+        },
+        downloadPageAsHTML: (filename = 'page.html') => {
+            if (typeof GM_download !== 'undefined') {
+                const htmlContent = document.documentElement.outerHTML;
+                const blob = new Blob([htmlContent], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                GM_download({ url: url, name: filename, saveAs: true, onload: () => URL.revokeObjectURL(url), // Clean up the Blob URL
+                    onerror: (error) => console.error("Download error:", error)
+                });
+                return { success: true, message: `Attempted to download current page HTML as '${filename}'.` };
+            }
+            return { success: false, message: `GM_download not available. Cannot download file.` };
+        },
+        openUrlInIframe: (iframeSelector, url) => {
+            const iframe = document.querySelector(iframeSelector);
+            if (iframe && iframe.tagName === 'IFRAME') {
+                iframe.src = url;
+                return { success: true, message: `Loaded URL '${url}' into iframe with selector: ${iframeSelector}.` };
+            }
+            return { success: false, message: `Iframe not found for selector: ${iframeSelector}.` };
+        },
+
+        // Data & Storage (using GM_ functions for Tampermonkey consistency)
+        copyTextToClipboard: (text) => {
+            if (typeof GM_setClipboard !== 'undefined') {
+                GM_setClipboard(text);
+                return { success: true, message: `Text copied to clipboard.` };
+            }
+            return { success: false, message: `GM_setClipboard not available. Cannot copy text.` };
+        },
+        pasteTextFromClipboard: async () => {
+            if (typeof GM_getClipboard !== 'undefined') {
+                return new Promise((resolve) => {
+                    GM_getClipboard((clipboardText) => {
+                        resolve({ success: true, text: clipboardText, message: `Text pasted from clipboard.` });
+                    });
+                });
+            }
+            return { success: false, message: `GM_getClipboard not available. Cannot paste text.` };
+        },
+        setLocalStorageItem: (key, value) => {
+            try {
+                GM_setValue(key, value); // Using GM_setValue for Tampermonkey's isolated storage
+                return { success: true, message: `LocalStorage item '${key}' set.` };
+            } catch (e) {
+                return { success: false, message: `Error setting LocalStorage item: ${e.message}` };
+            }
+        },
+        getLocalStorageItem: (key) => {
+            try {
+                const value = GM_getValue(key, null); // Using GM_getValue
+                return { success: true, value: value, message: `LocalStorage item '${key}' retrieved.` };
+            } catch (e) {
+                return { success: false, message: `Error getting LocalStorage item: ${e.message}` };
+            }
+        },
+        removeLocalStorageItem: (key) => {
+            try {
+                GM_deleteValue(key); // Using GM_deleteValue
+                return { success: true, message: `LocalStorage item '${key}' removed.` };
+            } catch (e) {
+                return { success: false, message: `Error removing LocalStorage item: ${e.message}` };
+            }
+        },
+        clearLocalStorage: async () => {
+            try {
+                // GM_listValues is async, must be awaited.
+                // This clears all values stored by THIS SCRIPT, not the entire domain's localStorage.
+                const keys = await GM_listValues();
+                let clearedCount = 0;
+                for (const key of keys) {
+                    if (key !== 'domAiApiKey') { // Don't clear the API key itself
+                        GM_deleteValue(key);
+                        clearedCount++;
+                    }
+                }
+                return { success: true, message: `Cleared ${clearedCount} script-specific LocalStorage items.` };
+            } catch (e) {
+                return { success: false, message: `Error clearing LocalStorage: ${e.message}` };
+            }
+        },
+        setSessionStorageItem: (key, value) => {
+            try {
+                sessionStorage.setItem(key, value);
+                return { success: true, message: `SessionStorage item '${key}' set.` };
+            } catch (e) {
+                return { success: false, message: `Error setting SessionStorage item: ${e.message}` };
+            }
+        },
+        getSessionStorageItem: (key) => {
+            try {
+                const value = sessionStorage.getItem(key);
+                return { success: true, value: value, message: `SessionStorage item '${key}' retrieved.` };
+            }
+            catch (e) {
+                return { success: false, message: `Error getting SessionStorage item: ${e.message}` };
+            }
+        },
+        removeSessionStorageItem: (key) => {
+            try {
+                sessionStorage.removeItem(key);
+                return { success: true, message: `SessionStorage item '${key}' removed.` };
+            } catch (e) {
+                return { success: false, message: `Error removing SessionStorage item: ${e.message}` };
+            }
+        },
+        clearSessionStorage: () => {
+            try {
+                sessionStorage.clear();
+                return { success: true, message: `All SessionStorage items cleared.` };
+            } catch (e) {
+                return { success: false, message: `Error clearing SessionStorage: ${e.message}` };
+            }
+        },
+        getCookie: (name) => {
+            const nameEQ = name + "=";
+            const ca = document.cookie.split(';');
+            for(let i=0; i < ca.length; i++) {
+                let c = ca[i];
+                while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+                if (c.indexOf(nameEQ) === 0) return { success: true, value: c.substring(nameEQ.length, c.length), message: `Cookie '${name}' retrieved.` };
+            }
+            return { success: false, message: `Cookie '${name}' not found.` };
+        },
+        setCookie: (name, value, days = null, path = '/') => {
+            let expires = "";
+            if (days) {
+                const date = new Date();
+                date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+                expires = "; expires=" + date.toUTCString();
+            }
+            document.cookie = name + "=" + (value || "") + expires + "; path=" + path;
+            return { success: true, message: `Cookie '${name}' set.` };
+        },
+        deleteCookie: (name) => {
+            document.cookie = name + '=; Max-Age=-99999999; path=/';
+            return { success: true, message: `Cookie '${name}' deleted.` };
+        },
+
+        // Advanced / Utilities
+        executeJavaScript: (code) => {
+            try {
+                // Using new Function() for safer execution than eval()
+                const result = (new Function(code))();
+                return { success: true, result: String(result), message: `Script executed successfully.` };
+            } catch (e) {
+                return { success: false, message: `Error executing script: ${e.message}` };
+            }
+        },
+        makeHttpRequest: async (url, method = 'GET', headers = {}, body = null) => {
+            return new Promise((resolve) => {
+                GM_xmlhttpRequest({
+                    method: method,
+                    url: url,
+                    headers: headers,
+                    data: body ? JSON.stringify(body) : null,
+                    onload: (response) => {
+                        try {
+                            const jsonResponse = JSON.parse(response.responseText);
+                            resolve({ success: true, status: response.status, headers: response.responseHeaders, data: jsonResponse, message: `HTTP request successful.` });
+                        } catch (e) {
+                            resolve({ success: true, status: response.status, headers: response.responseHeaders, data: response.responseText, message: `HTTP request successful (non-JSON response).` });
+                        }
+                    },
+                    onerror: (error) => {
+                        resolve({ success: false, message: `HTTP request failed: ${error.responseText || error.statusText || 'Unknown error'}` });
+                    }
+                });
+            });
+        },
+        downloadFile: (url, filename) => {
+            if (typeof GM_download !== 'undefined') {
+                GM_download({
+                    url: url,
+                    name: filename,
+                    saveAs: true,
+                    onload: () => { /* no direct success/fail callback for UI here */ },
+                    onerror: (error) => { console.error("Download error:", error); }
+                });
+                return { success: true, message: `Attempted to download file from ${url}. User will be prompted.` };
+            }
+            return { success: false, message: `GM_download not available. Cannot download file.` };
+        },
+        sendNotification: (title, message, imageUrl = '', timeout = 5000) => {
+            if (typeof GM_notification !== 'undefined') {
+                GM_notification({
+                    title: title,
+                    text: message,
+                    image: imageUrl,
+                    timeout: timeout,
+                    onclick: () => { /* console.log('Notification clicked'); */ }
+                });
+                return { success: true, message: `Sent notification: '${title}' - '${message}'.` };
+            }
+            return { success: false, message: `GM_notification not available. Cannot send notification.` };
+        },
+        alertUser: (message) => {
+            alert(message);
+            return { success: true, message: `Displayed alert to user.` };
+        },
+        confirmUser: (message) => {
+            const result = confirm(message);
+            return { success: true, confirmed: result, message: `Displayed confirmation to user. Result: ${result}.` };
+        },
+        promptUser: (message, defaultValue = '') => {
+            const result = prompt(message, defaultValue);
+            return { success: true, value: result, message: `Displayed prompt to user. Value: ${result}.` };
+        },
+        checkElementVisible: (selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                const visible = isElementVisible(el);
+                return { success: true, visible: visible, message: `Element visibility checked for selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        waitForElement: async (selector, timeout = 5000, interval = 200) => {
+            const startTime = Date.now();
+            while (Date.now() - startTime < timeout) {
+                if (document.querySelector(selector)) {
+                    return { success: true, message: `Element found within timeout: ${selector}.` };
+                }
+                await new Promise(resolve => setTimeout(resolve, interval));
+            }
+            return { success: false, message: `Element not found after timeout: ${selector}.` };
+        },
+        wait: async (milliseconds) => {
+            if (typeof milliseconds !== 'number' || milliseconds < 0) {
+                return { success: false, message: `Invalid wait time. Must be a positive number.` };
+            }
+            await new Promise(resolve => setTimeout(resolve, milliseconds));
+            return { success: true, message: `Waited for ${milliseconds} milliseconds.` };
+        },
+        simulateKeyPress: (selector, key, eventType = 'keydown') => {
+            const el = document.querySelector(selector);
+            if (el) {
+                const event = new KeyboardEvent(eventType, { key: key, code: key, bubbles: true, cancelable: true, composed: true });
+                el.dispatchEvent(event);
+                return { success: true, message: `Simulated '${key}' key press (${eventType}) on element with selector: ${selector}.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        findTextAndHighlight: (text, color = 'yellow') => {
+            tools.clearHighlights();
+            const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+            let node;
+            let count = 0;
+            const regex = new RegExp(text, 'gi');
+
+            while ((node = walk.nextNode())) {
+                if (node.parentNode && (node.parentNode.classList.contains('dom-ai-assistant') || node.parentNode.id === 'highlightBox')) {
+                    continue;
+                }
+                let match;
+                const originalText = node.nodeValue;
+                const fragments = [];
+                let lastIndex = 0;
+
+                while ((match = regex.exec(originalText)) !== null) {
+                    if (match.index > lastIndex) {
+                        fragments.push(document.createTextNode(originalText.substring(lastIndex, match.index)));
+                    }
+                    const span = document.createElement('span');
+                    span.className = 'dom-ai-highlight';
+                    span.style.setProperty('--highlight-color', color); // Use CSS variable
+                    span.textContent = match[0];
+                    fragments.push(span);
+                    lastIndex = regex.lastIndex;
+                    count++;
+                }
+
+                if (fragments.length > 0) {
+                    if (lastIndex < originalText.length) {
+                        fragments.push(document.createTextNode(originalText.substring(lastIndex)));
+                    }
+                    const parent = node.parentNode;
+                    if (parent) {
+                        const fragmentContainer = document.createDocumentFragment();
+                        fragments.forEach(frag => fragmentContainer.appendChild(frag));
+                        parent.replaceChild(fragmentContainer, node);
+                    }
+                }
+            }
+
+            if (count > 0) {
+                return { success: true, count: count, message: `Found and highlighted ${count} occurrences of '${text}'.` };
+            }
+            return { success: false, message: `No occurrences of '${text}' found.` };
+        },
+        clearHighlights: () => {
+            document.querySelectorAll('.dom-ai-highlight').forEach(span => {
+                const parent = span.parentNode;
+                if (parent) {
+                    parent.replaceChild(document.createTextNode(span.textContent), span);
+                    parent.normalize();
+                }
+            });
+            return { success: true, message: `All highlights cleared.` };
+        },
+        highlightElement: (selector, duration = 3000, color = '#4f46e5') => {
+            const el = document.querySelector(selector);
+            if (el) {
+                const originalOutline = el.style.outline;
+                const originalTransition = el.style.transition;
+                el.style.transition = 'outline 0.3s ease-in-out';
+                el.style.outline = `4px solid ${color}`;
+                setTimeout(() => {
+                    el.style.outline = originalOutline;
+                    el.style.transition = originalTransition;
+                }, duration);
+                return { success: true, message: `Highlighted element with selector: ${selector} for ${duration}ms.` };
+            }
+            return { success: false, message: `Element not found for selector: ${selector}.` };
+        },
+        evaluateXPath: (xpath) => {
+            try {
+                const result = document.evaluate(xpath, document, null, XPathResult.ANY_TYPE, null);
+                let nodes = [];
+                let node = result.iterateNext();
+                while (node) {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        nodes.push({ tagName: node.tagName.toLowerCase(), selector: getSelector(node), text: node.textContent.trim().substring(0, 100) });
+                    } else if (node.nodeType === Node.TEXT_NODE) {
+                        nodes.push({ type: 'text', text: node.nodeValue.trim().substring(0, 100) });
+                    }
+                    node = result.iterateNext();
+                }
+                return { success: true, result: nodes, message: `XPath evaluated successfully. Found ${nodes.length} nodes.` };
+            } catch (e) {
+                return { success: false, message: `Error evaluating XPath: ${e.message}` };
+            }
+        },
+        getCanvasDataURL: (selector, type = 'image/png') => {
+            const canvas = document.querySelector(selector);
+            if (canvas && canvas.tagName === 'CANVAS') {
+                try {
+                    const dataURL = canvas.toDataURL(type);
+                    return { success: true, dataURL: dataURL, message: `Canvas data URL retrieved as ${type}.` };
+                } catch (e) {
+                    return { success: false, message: `Error getting canvas data URL: ${e.message}` };
+                }
+            }
+            return { success: false, message: `Canvas element not found for selector: ${selector}.` };
+        },
+        logToConsole: (message, level = 'info') => {
+            const consoleLevels = ['log', 'info', 'warn', 'error', 'debug'];
+            if (consoleLevels.includes(level) && typeof console[level] === 'function') {
+                console[level](message);
+                return { success: true, message: `Logged to console at level '${level}'.` };
+            }
+            return { success: false, message: `Invalid console level: ${level}.` };
+        }
+    };
+
+    // --- AI TOOL DECLARATIONS ---
+    // Added 'category' property to each tool declaration for better organization and display.
+    const toolDeclarations = [
+        // Core Interaction & DOM Manipulation
+        { category: 'Core Interaction & DOM Manipulation', name: 'answerToUser', description: 'Respond directly to the user with text. Use this when you have a direct answer or need to confirm an action.', parameters: { type: 'object', properties: { text: { type: 'string', description: 'The text to say to the user.' } }, required: ['text'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'clickElement', description: 'Clicks an element on the page. Use this for buttons, links, etc.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element to click.' } }, required: ['selector'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'changeElementStyle', description: 'Changes the CSS style of one or more elements. Use this for visual modifications.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the elements.' }, property: { type: 'string', description: 'The CSS property to change (e.g., "backgroundColor", "color", "fontSize"). Use camelCase for properties.' }, value: { type: 'string', description: 'The new value for the CSS property (e.g., "red", "20px", "none").' } }, required: ['selector', 'property', 'value'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'setElementValue', description: 'Sets the value of an input, textarea, or select element. Use this to fill out forms.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the input, textarea, or select element.' }, value: { type: 'string', description: 'The value to set.' } }, required: ['selector', 'value'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'typeText', description: 'Simulates typing text character by character into an input or textarea element, triggering input/change events. Useful for forms that react to typing.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the input or textarea element.' }, text: { type: 'string', description: 'The text to type.' }, delay: { type: 'number', description: 'Optional: Delay in milliseconds between each character typed. Defaults to 50ms.', default: 50 } }, required: ['selector', 'text'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'modifyTextContent', description: 'Changes only the text content of a specific element, preserving its HTML structure. Use this to update visible text without affecting child elements.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the element.' }, newText: { type: 'string', description: 'The new text content to set.' } }, required: ['selector', 'newText'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'replaceElementContent', description: 'Replaces the inner HTML content of a specific element. Use this to modify visible text or inject new HTML.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the element.' }, newContent: { type: 'string', description: 'The new HTML or text content to set.' } }, required: ['selector', 'newContent'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'removeElement', description: 'Removes an element from the DOM. Use with caution, as this permanently alters the page.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the element to remove.' } }, required: ['selector'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'addRemoveClass', description: 'Adds or removes a CSS class from one or more elements. Useful for dynamically changing appearance or behavior.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the elements.' }, className: { type: 'string', description: 'The CSS class name to add or remove.' }, action: { type: 'string', enum: ['add', 'remove'], description: 'Whether to "add" or "remove" the class.' } }, required: ['selector', 'className', 'action'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'selectOption', description: 'Selects an option in a <select> (dropdown) element by its value attribute. Useful for interacting with dropdown menus.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the <select> element.' }, value: { type: 'string', description: 'The value attribute of the option to select.' } }, required: ['selector', 'value'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'toggleCheckboxRadio', description: 'Checks or unchecks a checkbox or radio button. Use this to interact with form elements.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the checkbox or radio input.' }, checked: { type: 'boolean', description: 'Set to `true` to check, `false` to uncheck.' } }, required: ['selector', 'checked'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'submitForm', description: 'Submits a form element. Use this after filling out form inputs to complete a submission.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the form element to submit.' } }, required: ['selector'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'resetForm', description: 'Resets a form element to its initial state. All form fields within the form will be cleared or reset to their default values.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the form element to reset.' } }, required: ['selector'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'clearInput', description: 'Clears the value of a specific input or textarea element.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the input or textarea element to clear.' } }, required: ['selector'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'setAttribute', description: 'Sets a new value for an HTML attribute on a specific element. Use this to modify attributes like `src`, `alt`, `data-*`, `title`, etc.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' }, attributeName: { type: 'string', description: 'The name of the attribute (e.g., "src", "data-status").' }, value: { type: 'string', description: 'The value to set for the attribute.' } }, required: ['selector', 'attributeName', 'value'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'removeAttribute', description: 'Removes an HTML attribute from a specific element. Use this to clean up or reset element properties.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' }, attributeName: { type: 'string', description: 'The name of the attribute to remove.' } }, required: ['selector'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'hoverElement', description: 'Simulates a mouse hover event over an element. This can trigger hover-specific CSS styles or JavaScript interactions.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element to hover over.' } }, required: ['selector'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'focusElement', description: 'Sets focus on a specific element, typically an input field or a button. This can activate input fields or trigger focus-related events.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element to focus.' } }, required: ['selector'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'simulateRightClick', description: 'Simulates a right-click (contextmenu) event on an element. Can be used to trigger context menus.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element to right-click.' } }, required: ['selector'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'doubleClickElement', description: 'Simulates a double-click event on an element.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element to double-click.' } }, required: ['selector'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'triggerEvent', description: 'Triggers a specified DOM event on an element. Useful for custom events or events not covered by specific tools (e.g., "change", "blur", "input").', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' }, eventType: { type: 'string', description: 'The type of event to trigger (e.g., "change", "blur", "input", "customEvent").' }, eventInit: { type: 'object', description: 'Optional: An object with event properties (e.g., { bubbles: true, cancelable: true }).' } }, required: ['selector', 'eventType'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'injectCSS', description: 'Injects a custom CSS string into the current page, allowing for dynamic styling changes.', parameters: { type: 'object', properties: { cssString: { type: 'string', description: 'The CSS code to inject.' } }, required: ['cssString'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'injectScript', description: 'Injects and executes a JavaScript code string into the current page. Use with caution.', parameters: { type: 'object', properties: { scriptContent: { type: 'string', description: 'The JavaScript code to inject and execute.' } }, required: ['scriptContent'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'insertHtml', description: 'Inserts HTML content relative to a specified element. Positions: "beforebegin", "afterbegin", "beforeend", "afterend".', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the target element.' }, position: { type: 'string', enum: ['beforebegin', 'afterbegin', 'beforeend', 'afterend'], description: 'The position to insert the HTML relative to the target element.' }, htmlContent: { type: 'string', description: 'The HTML content to insert.' } }, required: ['selector', 'position', 'htmlContent'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'replaceElement', description: 'Replaces an entire element with new HTML content.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the element to be replaced.' }, newHtmlContent: { type: 'string', description: 'The new HTML content to replace the element with.' } }, required: ['selector', 'newHtmlContent'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'clearAllInputs', description: 'Clears the value of all visible input and textarea elements on the current page. Useful for quickly resetting forms or input fields.', parameters: { type: 'object', properties: {} } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'clickCoordinates', description: 'Simulates a click event at specific X and Y coordinates relative to the viewport. Useful for interacting with elements that are hard to target by selector or for precise actions.', parameters: { type: 'object', properties: { x: { type: 'number', description: 'The X-coordinate (horizontal) for the click.' }, y: { type: 'number', description: 'The Y-coordinate (vertical) for the click.' } }, required: ['x', 'y'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'insertTextAtCursor', description: 'Inserts text into the currently focused input or textarea element at the cursor position. If no element is focused or it\'s not an input/textarea, the text will be appended to the first found visible input/textarea. Useful for precise text manipulation in forms.', parameters: { type: 'object', properties: { text: { type: 'string', description: 'The text to insert.' } }, required: ['text'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'simulateDragAndDrop', description: 'Simulates a basic drag-and-drop operation from a source element to a target element using mouse events. This might not work for all complex drag-and-drop implementations.', parameters: { type: 'object', properties: { sourceSelector: { type: 'string', description: 'CSS selector for the element to drag.' }, targetSelector: { type: 'string', description: 'CSS selector for the element to drop onto.' }, delay: { type: 'number', description: 'Optional: Delay in milliseconds between drag steps (mousedown, mousemove, mouseup). Defaults to 100ms.', "default": 100 } }, required: ['sourceSelector', 'targetSelector'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'scrollElementBy', description: 'Scrolls a specific scrollable element (e.g., a div with overflow: auto) by a given amount horizontally and/or vertically. Useful for navigating within scrollable containers.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the scrollable element.' }, x: { type: 'number', description: 'The amount to scroll horizontally (positive for right, negative for left).' }, y: { type: 'number', description: 'The amount to scroll vertically (positive for down, negative for up).' }, behavior: { type: 'string', enum: ['auto', 'smooth'], "default": "smooth", description: "Optional: The scroll behavior. Defaults to 'smooth'." } }, required: ['selector', 'x', 'y'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'addElement', description: 'Creates and inserts a new HTML element into the DOM. You can specify its tag name, attributes, inner HTML, and position relative to a parent element.', parameters: { type: 'object', properties: { parentSelector: { type: 'string', description: 'CSS selector for the parent element where the new element will be added.' }, tagName: { type: 'string', description: 'The HTML tag name of the new element (e.g., "div", "span", "button").' }, attributes: { type: 'object', description: 'Optional: An object of HTML attributes to set on the new element (e.g., {"id": "myNewId", "class": "my-class"}).' }, innerHTML: { type: 'string', description: 'Optional: The inner HTML content of the new element.' }, position: { type: 'string', enum: ['beforebegin', 'afterbegin', 'beforeend', 'afterend'], "default": "beforeend", description: 'Optional: The position to insert the new element relative to the parent. Defaults to "beforeend".' } }, required: ['parentSelector', 'tagName'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'setElementVisibility', description: 'Sets the visibility of one or more elements by changing their `display` CSS property. Use `true` to show (default display), `false` to hide (`display: none`).', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the elements.' }, visible: { type: 'boolean', description: 'Set to `true` to make visible, `false` to hide.' } }, required: ['selector', 'visible'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'disableElement', description: 'Disables a form control element (input, button, select, textarea) so it cannot be interacted with. Adds the `disabled` attribute.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the element to disable.' } }, required: ['selector'] } },
+        { category: 'Core Interaction & DOM Manipulation', name: 'enableElement', description: 'Enables a previously disabled form control element by removing the `disabled` attribute.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'CSS selector for the element to enable.' } }, required: ['selector'] } },
+
+        // Information Retrieval
+        { category: 'Information Retrieval', name: 'getSimplifiedDom', description: 'Gets a simplified representation of the current page\'s interactive and key content elements. Use this first to understand the page structure and identify elements before performing actions. It helps you "see" the page. The output is limited to the first 100 visible elements and includes relevant attributes like text, ID, class, href, src, alt, value, placeholder, type, name, checked, disabled, aria-label, role, data-testid, title, and computed size. Note: Selectors generated may be brittle on websites using dynamic class names (e.g., React, Vue, Svelte).', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getElementText', description: 'Gets the visible text content of a specific element identified by a CSS selector. Useful for reading content from the page. The output is truncated to 500 characters.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getElementAttribute', description: 'Gets the value of a specific HTML attribute (e.g., "href", "src", "alt", "name", "value") from an element. Useful for extracting data like URLs or image sources. The output is truncated to 500 characters.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' }, attributeName: { type: 'string', description: 'The name of the attribute to retrieve (e.g., "href", "src").' } }, required: ['selector', 'attributeName'] } },
+        { category: 'Information Retrieval', name: 'getElementAttributes', description: 'Retrieves all attributes (name and value) of a specified element. Useful for a comprehensive inspection of an element\'s properties.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getAllLinks', description: 'Retrieves a list of all visible links on the page, including their text and URL. Use this to get an overview of navigation options or to find specific links. The output is limited to the first 50 links.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getAllImages', description: 'Retrieves a list of all visible image elements on the page, including their src, alt, width, and height. The output is limited to the first 50 images.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getPageTitle', description: 'Gets the title of the current web page. Useful for confirming the current page context.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getPageURL', description: 'Gets the full URL of the current web page. Useful for confirming the current page context or for reporting.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getElementComputedStyle', description: 'Gets the actual computed (rendered) CSS style value for a specific property of an element. Useful for inspecting the live styling of an element.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' }, propertyName: { type: 'string', description: 'The CSS property name to retrieve (e.g., "color", "font-size", "display"). Use kebab-case or camelCase.' } }, required: ['selector', 'propertyName'] } },
+        { category: 'Information Retrieval', name: 'getVisibleTextContent', description: 'Retrieves all visible text content from the current page. Useful for summarizing page content or extracting large blocks of text. The output is truncated to 1000 characters.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getElementBoundingRect', description: 'Gets the size and position of an element relative to the viewport and the document. Useful for understanding an element\'s layout.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getElementOffset', description: 'Gets the offset (top, left) of an element relative to the document.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getElementScrollPosition', description: 'Gets the current scroll position (scrollTop, scrollLeft) of a scrollable element.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the scrollable element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getFormValues', description: 'Retrieves the current values of all input, textarea, and select elements within a specified form. Returns an object where keys are input names and values are their current states.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the form element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getSelectOptions', description: 'Retrieves all options (text, value, selected state) from a <select> element.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the <select> element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getElementChildren', description: 'Retrieves a list of direct child elements for a given selector, including their tag name, selector, and truncated text content. Limited to 10 children by default.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the parent element.' }, maxChildren: { type: 'number', description: 'Optional: Maximum number of children to retrieve. Defaults to 10.', default: 10 } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getMetaTags', description: 'Retrieves all meta tags from the document\'s head, including their attributes.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getGeolocation', description: 'Retrieves the user\'s current geographical location (latitude, longitude, accuracy). Requires user permission.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getUserAgent', description: 'Retrieves the browser\'s user agent string.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getAllCookies', description: 'Retrieves a list of all cookies for the current document.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getLocalStorageKeys', description: 'Retrieves a list of all keys currently stored in the browser\'s localStorage for the current domain.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getSessionStorageKeys', description: 'Retrieves a list of all keys currently stored in the browser\'s sessionStorage for the current tab.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getHeaders', description: 'Retrieves the text content and selector of all heading elements (H1-H6) on the page, or a specific heading level.', parameters: { type: 'object', properties: { level: { type: 'number', minimum: 1, maximum: 6, description: 'Optional: Specify a heading level (1-6) to retrieve only those headings. If omitted, all H1-H6 are returned.' } } } },
+        { category: 'Information Retrieval', name: 'getTableData', description: 'Extracts data from an HTML table into a 2D array (rows and columns).', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the <table> element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'checkElementExists', description: 'Checks if an element matching the given CSS selector exists in the DOM.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element to check.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getFormInputs', description: 'Retrieves a list of input, textarea, and select elements within a specified form, including their type, name, placeholder, and current value. Useful for understanding form structure before filling it.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the form element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getOuterHTML', description: 'Retrieves the full HTML content of an element, including its own tag. Useful for inspecting the complete structure of a specific component.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getViewportDimensions', description: 'Retrieves the current width and height of the browser\'s viewport (the visible area of the web page).', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getDocumentDimensions', description: 'Retrieves the total scrollable width and height of the entire document. This can be larger than the viewport if the page content extends beyond the visible area.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getSelectionText', description: 'Retrieves the text currently selected by the user on the page. Returns an empty string if no text is selected.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'setPageTitle', description: 'Sets the title of the current web page. This is visible in the browser tab.', parameters: { type: 'object', properties: { newTitle: { type: 'string', description: 'The new title for the page.' } }, required: ['newTitle'] } },
+        { category: 'Information Retrieval', name: 'getIframeSources', description: 'Retrieves the source URLs and selectors of all visible iframe elements on the page. Useful for understanding embedded content.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getLoadedScripts', description: 'Retrieves a list of all external JavaScript files (script tags with a \'src\' attribute) loaded on the current page.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getLoadedStylesheets', description: 'Retrieves a list of all external CSS stylesheets (link tags with rel=\'stylesheet\' and an \'href\' attribute) loaded on the current page.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'isElementChecked', description: 'Checks if a checkbox or radio button is currently checked. Returns true or false.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the checkbox or radio input.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'isElementDisabled', description: 'Checks if an element is currently disabled (e.g., an input, button, or select). Returns true or false.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'isElementFocused', description: 'Checks if an element currently has keyboard focus. Returns true or false.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getScrollHeight', description: 'Gets the total scrollable height of an element, including content not currently visible on screen.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getScrollWidth', description: 'Gets the total scrollable width of an element, including content not currently visible on screen.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' } }, required: ['selector'] } },
+        { category: 'Information Retrieval', name: 'getBrowserInfo', description: 'Retrieves basic information about the current browser, including its name, version, and user agent string.', parameters: { type: 'object', properties: {} } },
+        { category: 'Information Retrieval', name: 'getURLParameters', description: 'Parses and returns all query parameters from the current page\'s URL as a key-value object. Useful for extracting data from URLs.', parameters: { type: 'object', properties: {} } },
+
+        // Browser Navigation & Control
+        { category: 'Browser Navigation & Control', name: 'navigateTo', description: 'Navigates the browser to a new URL. Use this to go to a different page or section of a website.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The full URL to navigate to.' } }, required: ['url'] } },
+        { category: 'Browser Navigation & Control', name: 'goBack', description: 'Navigates back to the previous page in the browser history.', parameters: { type: 'object', properties: {} } },
+        { category: 'Browser Navigation & Control', name: 'goForward', description: 'Navigates forward to the next page in the browser history.', parameters: { type: 'object', properties: {} } },
+        { category: 'Browser Navigation & Control', name: 'reloadPage', description: 'Reloads the current web page.', parameters: { type: 'object', properties: {} } },
+        { category: 'Browser Navigation & Control', name: 'scrollPage', description: 'Scrolls the current page up or down by 80% of the viewport height. Use this to bring elements into view or to read more content.', parameters: { type: 'object', properties: { direction: { type: 'string', enum: ['up', 'down'], description: 'The direction to scroll.' } }, required: ['direction'] } },
+        { category: 'Browser Navigation & Control', name: 'scrollPageToTop', description: 'Scrolls the main browser window to the very top of the page.', parameters: { type: 'object', properties: {} } },
+        { category: 'Browser Navigation & Control', name: 'scrollPageToBottom', description: 'Scrolls the main browser window to the very bottom of the page.', parameters: { type: 'object', properties: {} } },
+        { category: 'Browser Navigation & Control', name: 'scrollToElement', description: 'Scrolls the viewport to bring a specific element into view. Useful for navigating to sections of a long page.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element to scroll to.' } }, required: ['selector'] } },
+        { category: 'Browser Navigation & Control', name: 'getScrollPosition', description: 'Gets the current horizontal (X) and vertical (Y) scroll position of the window.', parameters: { type: 'object', properties: {} } },
+        { category: 'Browser Navigation & Control', name: 'setScrollPosition', description: 'Sets the horizontal (X) and vertical (Y) scroll position of the window.', parameters: { type: 'object', properties: { x: { type: 'number', description: 'The horizontal scroll position.' }, y: { type: 'number', description: 'The vertical scroll position.' } }, required: ['x', 'y'] } },
+        { category: 'Browser Navigation & Control', name: 'openNewTab', description: 'Opens a new browser tab with the specified URL. Note: Browser security may block this if not triggered by a user gesture.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The URL to open in the new tab.' } }, required: ['url'] } },
+        { category: 'Browser Navigation & Control', name: 'closeCurrentTab', description: 'Attempts to close the current browser tab. Note: Browser security may block this if the tab was not opened by a script.', parameters: { type: 'object', properties: {} } },
+        { category: 'Browser Navigation & Control', name: 'setPageZoom', description: 'Sets the zoom level of the current page. A value of 1 is 100%. Values typically range from 0.1 to 5.', parameters: { type: 'object', properties: { zoomLevel: { type: 'number', description: 'The desired zoom level (e.g., 1.0 for 100%, 0.5 for 50%, 2.0 for 200%).' } }, required: ['zoomLevel'] } },
+        { category: 'Browser Navigation & Control', name: 'printPage', description: 'Triggers the browser\'s print dialog for the current page.', parameters: { type: 'object', properties: {} } },
+        { category: 'Browser Navigation & Control', name: 'downloadPageAsHTML', description: 'Downloads the entire current page\'s HTML content as an HTML file. The user will be prompted to save the file.', parameters: { type: 'object', properties: { filename: { type: 'string', description: 'Optional: The suggested filename for the downloaded HTML file. Defaults to "page.html".', "default": "page.html" } }, required: [] } },
+        { category: 'Browser Navigation & Control', name: 'openUrlInIframe', description: 'Loads a specified URL into an existing iframe on the page. Useful for interacting with content within an iframe.', parameters: { type: 'object', properties: { iframeSelector: { type: 'string', description: 'CSS selector for the target iframe element.' }, url: { type: 'string', description: 'The URL to load into the iframe.' } }, required: ['iframeSelector', 'url'] } },
+
+        // Data & Storage
+        { category: 'Data & Storage', name: 'copyTextToClipboard', description: 'Copies a given text string to the user\'s clipboard using Tampermonkey\'s GM_setClipboard. Useful for extracting text from the page for external use.', parameters: { type: 'object', properties: { text: { type: 'string', description: 'The text string to copy.' } }, required: ['text'] } },
+        { category: 'Data & Storage', name: 'pasteTextFromClipboard', description: 'Retrieves text from the user\'s clipboard using Tampermonkey\'s GM_getClipboard. Note: Browser security may require a user gesture (e.g., a click) before this can be called.', parameters: { type: 'object', properties: {} } },
+        { category: 'Data & Storage', name: 'setLocalStorageItem', description: 'Sets a key-value pair in the browser\'s localStorage using Tampermonkey\'s GM_setValue. Data persists across browser sessions and is isolated per script.', parameters: { type: 'object', properties: { key: { type: 'string', description: 'The key for the localStorage item.' }, value: { type: 'string', description: 'The value to store.' } }, required: ['key', 'value'] } },
+        { category: 'Data & Storage', name: 'getLocalStorageItem', description: 'Retrieves a value from the browser\'s localStorage by its key using Tampermonkey\'s GM_getValue.', parameters: { type: 'object', properties: { key: { type: 'string', description: 'The key of the localStorage item to retrieve.' } }, required: ['key'] } },
+        { category: 'Data & Storage', name: 'removeLocalStorageItem', description: 'Removes a key-value pair from the browser\'s localStorage using Tampermonkey\'s GM_deleteValue.', parameters: { type: 'object', properties: { key: { type: 'string', description: 'The key of the localStorage item to remove.' } }, required: ['key'] } },
+        { category: 'Data & Storage', name: 'clearLocalStorage', description: 'Clears all key-value pairs stored by this script in Tampermonkey\'s localStorage for the current domain (excluding the API key).', parameters: { type: 'object', properties: {} } },
+        { category: 'Data & Storage', name: 'setSessionStorageItem', description: 'Sets a key-value pair in the browser\'s sessionStorage. Data only persists for the current browser session/tab.', parameters: { type: 'object', properties: { key: { type: 'string', description: 'The key for the sessionStorage item.' }, value: { type: 'string', description: 'The value to store.' } } , required: ['key', 'value']}},
+        { category: 'Data & Storage', name: 'getSessionStorageItem', description: 'Retrieves a value from the browser\'s sessionStorage by its key.', parameters: { type: 'object', properties: { key: { type: 'string', description: 'The key of the sessionStorage item to retrieve.' } }, required: ['key'] } },
+        { category: 'Data & Storage', name: 'removeSessionStorageItem', description: 'Removes a key-value pair from the browser\'s sessionStorage.', parameters: { type: 'object', properties: { key: { type: 'string', description: 'The key of the sessionStorage item to remove.' } }, required: ['key'] } },
+        { category: 'Data & Storage', name: 'clearSessionStorage', description: 'Clears all key-value pairs from the browser\'s sessionStorage for the current tab.', parameters: { type: 'object', properties: {} } },
+        { category: 'Data & Storage', name: 'getCookie', description: 'Retrieves the value of a specific cookie by its name.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'The name of the cookie to retrieve.' } }, required: ['name'] } },
+        { category: 'Data & Storage', name: 'setCookie', description: 'Sets a cookie with a given name, value, and optional expiration days and path. Defaults to session cookie if days are not provided, and path is "/" by default.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'The name of the cookie.' }, value: { type: 'string', description: 'The value of the cookie.' }, days: { type: 'number', description: 'Optional: Number of days until the cookie expires.' }, path: { type: 'string', description: 'Optional: The path for which the cookie is valid. Defaults to "/".', default: '/' } }, required: ['name', 'value'] } },
+        { category: 'Data & Storage', name: 'deleteCookie', description: 'Deletes a cookie by its name.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'The name of the cookie to delete.' } }, required: ['name'] } },
+
+        // Advanced / Utilities
+        { category: 'Advanced / Utilities', name: 'executeJavaScript', description: '**DANGER: Use with extreme caution.** Executes arbitrary JavaScript code directly on the page. Only use if no other tool can achieve the task and you are certain of the code\'s safety and intent. The result of the last expression is returned.', parameters: { type: 'object', properties: { code: { type: 'string', description: 'The JavaScript code to execute.' } }, required: ['code'] } },
+        { category: 'Advanced / Utilities', name: 'makeHttpRequest', description: 'Performs an HTTP request (GET, POST, PUT, DELETE, etc.) to a specified URL. Useful for interacting with APIs or fetching data from other sources. Assumes JSON body for POST/PUT.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The URL to make the request to.' }, method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'], default: 'GET', description: 'The HTTP method (e.g., GET, POST).' }, headers: { type: 'object', description: 'Optional: An object of HTTP headers (e.g., {"Authorization": "Bearer token"}).' }, body: { type: 'object', description: 'Optional: A JSON object representing the request body for POST/PUT/PATCH.' } }, required: ['url'] } },
+        { category: 'Advanced / Utilities', name: 'downloadFile', description: 'Initiates a file download from a given URL using Tampermonkey\'s GM_download. The user will be prompted to save the file.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'The URL of the file to download.' }, filename: { type: 'string', description: 'Optional: The suggested filename for the download. Defaults to the original filename from the URL.' } }, required: ['url'] } },
+        { category: 'Advanced / Utilities', name: 'sendNotification', description: 'Displays a desktop notification to the user using Tampermonkey\'s GM_notification.', parameters: { type: 'object', properties: { title: { type: 'string', description: 'The title of the notification.' }, message: { type: 'string', description: 'The main text content of the notification.' }, imageUrl: { type: 'string', description: 'Optional: URL of an image to display in the notification.' }, timeout: { type: 'number', description: 'Optional: Duration in milliseconds after which the notification will automatically close. Defaults to 5000ms.', default: 5000 } }, required: ['title', 'message'] } },
+        { category: 'Advanced / Utilities', name: 'alertUser', description: 'Displays a standard browser alert dialog with a message to the user.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'The message to display in the alert.' } }, required: ['message'] } },
+        { category: 'Advanced / Utilities', name: 'confirmUser', description: 'Displays a standard browser confirmation dialog (OK/Cancel) and returns the user\'s boolean choice.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'The message to display in the confirmation dialog.' } }, required: ['message'] } },
+        { category: 'Advanced / Utilities', name: 'promptUser', description: 'Displays a standard browser prompt dialog asking the user for text input, and returns the entered value.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'The message to display in the prompt.' }, defaultValue: { type: 'string', description: 'Optional: The default value to pre-fill the input field with.' } }, required: ['message'] } },
+        { category: 'Advanced / Utilities', name: 'checkElementVisible', description: 'Checks if an element is currently visible within the viewport. Note: For general page understanding, `getSimplifiedDom` is often more comprehensive as it returns a list of visible elements.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element.' } }, required: ['selector'] } },
+        { category: 'Advanced / Utilities', name: 'waitForElement', description: 'Asynchronously waits for an element to appear in the DOM. Useful for dynamic content.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element to wait for.' }, timeout: { type: 'number', description: 'Optional: Maximum time to wait in milliseconds. Defaults to 5000ms.', default: 5000 }, interval: { type: 'number', description: 'Optional: Interval in milliseconds between checks. Defaults to 200ms.', default: 200 } }, required: ['selector'] } },
+        { category: 'Advanced / Utilities', name: 'wait', description: 'Pauses the execution for a specified number of milliseconds. Useful for waiting for animations or dynamic content to load.', parameters: { type: 'object', properties: { milliseconds: { type: 'number', description: 'The number of milliseconds to wait.' } }, required: ['milliseconds'] } },
+        { category: 'Advanced / Utilities', name: 'simulateKeyPress', description: 'Simulates a keyboard key press (e.g., "Enter", "Escape", "Tab") on a specific element. Useful for triggering keyboard shortcuts or form submissions.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element to simulate the key press on.' }, key: { type: 'string', description: 'The key to press (e.g., "Enter", "Escape", "a", "ArrowDown").' }, eventType: { type: 'string', enum: ['keydown', 'keyup', 'keypress'], default: 'keydown', description: 'Optional: The type of keyboard event to simulate. Defaults to "keydown".' } }, required: ['selector', 'key'] } },
+        { category: 'Advanced / Utilities', name: 'findTextAndHighlight', description: 'Searches for all occurrences of a given text string on the page and highlights them. Clears previous highlights.', parameters: { type: 'object', properties: { text: { type: 'string', description: 'The text to find and highlight.' }, color: { type: 'string', description: 'Optional: CSS color string for the highlight (e.g., "yellow", "rgba(255,0,0,0.5)"). Defaults to yellow.' } }, required: ['text'] } },
+        { category: 'Advanced / Utilities', name: 'clearHighlights', description: 'Removes all highlights previously added by `findTextAndHighlight` or `highlightElement`.', parameters: { type: 'object', properties: {} } },
+        { category: 'Advanced / Utilities', name: 'highlightElement', description: 'Temporarily highlights a specific element on the page with a border. Useful for visual debugging or drawing attention to an element.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the element to highlight.' }, duration: { type: 'number', description: 'Optional: Duration in milliseconds for the highlight to remain visible. Defaults to 3000ms.', default: 3000 }, color: { type: 'string', description: 'Optional: CSS color string for the highlight border. Defaults to "#4f46e5".', default: '#4f46e5' } }, required: ['selector'] } },
+        { category: 'Advanced / Utilities', name: 'evaluateXPath', description: 'Evaluates an XPath expression on the current document and returns a list of matching nodes (elements or text).', parameters: { type: 'object', properties: { xpath: { type: 'string', description: 'The XPath expression to evaluate.' } }, required: ['xpath'] } },
+        { category: 'Advanced / Utilities', name: 'getCanvasDataURL', description: 'Retrieves the Base64 data URL of a <canvas> element, representing its current content as an image.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'A CSS selector for the <canvas> element.' }, type: { type: 'string', default: 'image/png', enum: ['image/png', 'image/jpeg', 'image/webp'], description: 'Optional: The image format for the data URL. Defaults to "image/png".' } }, required: ['selector'] } },
+        { category: 'Advanced / Utilities', name: 'logToConsole', description: 'Logs a message to the browser\'s developer console. Useful for debugging or tracking AI actions.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'The message to log.' }, level: { type: 'string', enum: ['log', 'info', 'warn', 'error', 'debug'], default: 'info', description: 'Optional: The console method to use (e.g., "info", "warn", "error"). Defaults to "info".' } }, required: ['message'] } }
+    ];
+
+    // --- AI INTERACTION LOGIC ---
+    // System instruction for the AI (important for guiding its behavior)
+    const SYSTEM_INSTRUCTION = `You are an expert web automation and information retrieval assistant. Your goal is to understand the user's request and fulfill it by interacting with the current webpage using the provided tools. Here's how you should operate:
+1.  **Understand the Goal**: Clearly identify what the user wants to achieve.
+2.  **Inspect the Page (if necessary)**: If the request involves interacting with specific elements or understanding the page content, use 'getSimplifiedDom' first. This is crucial for you to "see" the page and identify correct CSS selectors.
+3.  **Plan and Execute**: Based on the user's request and the page information, select the most appropriate tool(s) and their arguments.
+4.  **Multi-step Actions**: Many tasks will require multiple tool calls. Execute them one by one.
+5.  **Report Results**: After each tool call, you will receive its result. Use this result to inform your next action or to formulate a response to the user.
+6.  **Answer Directly**: Once the task is completed or you have a direct answer, use the 'answerToUser' tool to communicate with the user.
+7.  **Error Handling**: If a tool call fails, analyze the error message and try to recover (e.g., try a different selector, inform the user).
+8.  **Prioritize 'getSimplifiedDom'**: When you need to understand the page structure or find elements, prefer 'getSimplifiedDom' over other specific 'get' tools initially, as it provides a broad overview. Only use specific 'get' tools (like 'getElementText', 'getAllLinks') if you need more detail on an already identified element or a very specific type of information.
+9.  **Selector Robustness**: When providing selectors, aim for the most specific and stable ones available (e.g., IDs are best, then unique classes, then more general tag/class combinations with nth-of-type if necessary). Avoid overly generic selectors like 'div' or 'span' unless absolutely necessary.
+10. **Confirmation**: For destructive actions (e.g., 'removeElement', 'clearAllInputs', 'navigateTo' to an external site), consider asking the user for confirmation using 'confirmUser' before proceeding, or at least clearly state your intent.
+11. **Be Concise**: Keep your 'answerToUser' responses brief and to the point.
+12. **Tool Arguments**: Always provide all required arguments for a tool. If an argument is optional, only include it if it's necessary for the specific task.
+13. **Dynamic Elements**: Be aware that some elements might be dynamically loaded. If a selector doesn't work, consider using 'waitForElement' before trying again, or re-inspecting the DOM with 'getSimplifiedDom'.
+14. **User-Friendly Selectors**: If the user provides a vague description (e.g., "the big red button"), you will likely need to use 'getSimplifiedDom' to find a suitable selector. Do not guess selectors without inspecting the DOM.
+15. **Context**: Remember the previous turns in the conversation.
+`;
+
+    let thinkingMessageDiv = null; // Reference to the "Thinking..." message div
+
+    async function callGeminiApi() {
+        if (!apiKey) {
+            addMessage("API Key is not set. Please open settings (⚙️) and save your Gemini API key.", 'ai', false, 'tool-error');
+            return null;
+        }
+
+        const requestBody = {
+            contents: chatHistory,
+            tools: [{ functionDeclarations: toolDeclarations }],
+            safetySettings: [
+                { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+            ]
+        };
+
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: `${GEMINI_API_URL}?key=${apiKey}`,
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                data: JSON.stringify(requestBody),
+                onload: (response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        try {
+                            const jsonResponse = JSON.parse(response.responseText);
+                            resolve(jsonResponse);
+                        } catch (e) {
+                            console.error('Failed to parse Gemini API response:', e);
+                            addMessage(`Error: Failed to parse Gemini API response. ${e.message}`, 'ai', false, 'tool-error');
+                            reject(e);
+                        }
+                    } else {
+                        console.error('Gemini API Error:', response.status, response.responseText);
+                        addMessage(`Gemini API Error: ${response.status} - ${response.responseText}`, 'ai', false, 'tool-error');
+                        reject(new Error(`API Error: ${response.status} - ${response.responseText}`));
+                    }
+                },
+                onerror: (error) => {
+                    console.error('Network Error during Gemini API call:', error);
+                    addMessage(`Network Error during Gemini API call: ${error.responseText || error.statusText || 'Unknown error'}`, 'ai', false, 'tool-error');
+                    reject(error);
+                }
+            });
+        });
+    }
+
+    /**
+     * Handles the complete, multi-turn conversation flow with the Gemini API.
+     * This includes sending user prompts, processing AI responses (text or tool calls),
+     * executing tool calls, and sending tool results back to the AI for further processing.
+     * @param {string} userPrompt The user's input message.
+     */
+    async function askAi(userPrompt) {
+        if (!apiKey) {
+            addMessage("Please set your Gemini API key in the settings to start the conversation.", 'ai');
+            settingsModal.style.display = 'flex';
+            return;
+        }
+
+        // Add user prompt to chat history and display it
+        if (userPrompt) {
+            addMessage(userPrompt, 'user');
+
+            // Initialize chatHistory with system instruction and a priming model response if it's the very first turn
+            if (!isPrimed) {
+                chatHistory.push({ role: 'user', parts: [{ text: SYSTEM_INSTRUCTION }] });
+                // Add a dummy model response to "prime" the model for tool use.
+                // This helps Gemini understand it should use tools based on the system instruction.
+                chatHistory.push({ role: 'model', parts: [{ text: 'Okay, I understand. How can I help you interact with this page?' }] });
+                isPrimed = true;
+            }
+            chatHistory.push({ role: 'user', parts: [{ text: userPrompt }] });
+        }
+
+        let consecutiveToolCalls = 0; // To prevent infinite tool call loops
+        const MAX_CONSECUTIVE_TOOL_CALLS = 10;
+
+        try {
+            // Display thinking indicator
+            thinkingMessageDiv = addMessage('', 'ai', true);
+
+            while (true) {
+                const apiResponse = await callGeminiApi();
+
+                if (!apiResponse || !apiResponse.candidates || apiResponse.candidates.length === 0) {
+                    updateThinkingMessage("AI did not return a valid response.", 'tool-error');
+                    break;
+                }
+
+                const candidate = apiResponse.candidates[0];
+                const parts = candidate.content?.parts;
+
+                if (!parts || parts.length === 0) {
+                    updateThinkingMessage("AI returned an empty response.", 'tool-error');
+                    break;
+                }
+
+                const firstPart = parts[0];
+
+                if (firstPart.text) {
+                    // AI responded with text directly
+                    updateThinkingMessage(firstPart.text);
+                    chatHistory.push({ role: 'model', parts: [{ text: firstPart.text }] });
+                    break; // Exit loop, conversation turn completed
+                } else if (firstPart.functionCall) {
+                    // AI wants to call a tool
+                    consecutiveToolCalls++;
+                    if (consecutiveToolCalls > MAX_CONSECUTIVE_TOOL_CALLS) {
+                        updateThinkingMessage(`Error: Exceeded maximum consecutive tool calls (${MAX_CONSECUTIVE_TOOL_CALLS}). This may indicate an infinite loop. Please rephrase your request.`, 'tool-error');
+                        break;
+                    }
+
+                    const functionCall = firstPart.functionCall;
+                    const functionName = functionCall.name;
+                    const functionArgs = functionCall.args;
+
+                    updateThinkingMessage(`Calling tool: <pre>${escapeHtml(functionName)}(${escapeHtml(JSON.stringify(functionArgs, null, 2))})</pre>`, 'tool-call');
+                    chatHistory.push({ role: 'model', parts: [{ functionCall: { name: functionName, args: functionArgs } }] });
+
+                    if (tools[functionName]) {
+                        let toolResult;
+                        try {
+                            // Execute the tool function, spreading the arguments from the object.
+                            // This works because the tool functions are defined to accept positional arguments
+                            // that correspond to the values in the `functionArgs` object provided by Gemini.
+                            toolResult = await tools[functionName](...Object.values(functionArgs));
+
+                            // Ensure toolResult is an object with a message property for consistent display
+                            if (typeof toolResult !== 'object' || toolResult === null || !('message' in toolResult)) {
+                                toolResult = { success: false, message: `Tool '${functionName}' returned an invalid format. Expected object with 'message' property. Actual: ${JSON.stringify(toolResult)}` };
+                            }
+                        } catch (toolError) {
+                            toolResult = { success: false, message: `Tool execution failed: ${toolError.message || toolError}` };
+                        }
+
+                        updateThinkingMessage(`Tool result: <pre>${escapeHtml(JSON.stringify(toolResult, null, 2))}</pre>`, toolResult.success ? 'tool-result' : 'tool-error');
+                        chatHistory.push({ role: 'user', parts: [{ functionResponse: { name: functionName, response: toolResult } }] });
+                        // The loop continues to send the tool result back to the AI for its next turn.
+
+                    } else {
+                        const errorMessage = `Error: Tool '${functionName}' not found.`;
+                        updateThinkingMessage(errorMessage, 'tool-error');
+                        chatHistory.push({ role: 'user', parts: [{ functionResponse: { name: functionName, response: { success: false, message: errorMessage } } }] });
+                        // The loop continues to send the error back to the AI.
+                    }
+                } else {
+                    updateThinkingMessage("AI returned an unexpected content type.", 'tool-error');
+                    break;
+                }
+            }
+        } catch (error) {
+            console.error("Error in askAi function:", error);
+            // Ensure thinking message is removed or updated on overall error
+            if (thinkingMessageDiv && thinkingMessageDiv.parentNode) {
+                if (thinkingMessageDiv.querySelector('.thinking-indicator')) {
+                    thinkingMessageDiv.remove();
+                }
+                thinkingMessageDiv = null;
+            }
+            addMessage(`An unexpected error occurred during AI processing: ${error.message}`, 'ai', false, 'tool-error');
+        } finally {
+            // Ensure thinking message is removed if loop breaks unexpectedly
+            if (thinkingMessageDiv && thinkingMessageDiv.parentNode) {
+                // If the thinking message was updated to a tool call/result, it's already handled.
+                // Only remove if it's still the 'thinking' placeholder.
+                if (thinkingMessageDiv.querySelector('.thinking-indicator')) {
+                    thinkingMessageDiv.remove();
+                }
+                thinkingMessageDiv = null;
+            }
+        }
+    }
+
+    // Helper to update the last message (the thinking indicator)
+    function updateThinkingMessage(newContent, messageTypeClass = '') {
+        if (thinkingMessageDiv) {
+            const contentDiv = thinkingMessageDiv.querySelector('.message-content');
+            if (contentDiv) {
+                contentDiv.innerHTML = newContent; // Use innerHTML as newContent might contain <pre> tags
+
+                // Remove the thinking indicator dots if they exist
+                const thinkingIndicator = contentDiv.querySelector('.thinking-indicator');
+                if (thinkingIndicator) {
+                    thinkingIndicator.remove();
+                }
+
+                // Update message type class
+                thinkingMessageDiv.classList.remove('ai-message', 'tool-call', 'tool-result', 'tool-error'); // Remove all previous specific classes
+                if (messageTypeClass) {
+                    thinkingMessageDiv.classList.add(messageTypeClass); // Add new specific class
+                } else {
+                    thinkingMessageDiv.classList.add('ai-message'); // Re-add default AI class if no specific type
+                }
+            }
+        } else {
+            // Fallback: if thinkingMessageDiv somehow got lost, add a new message
+            addMessage(newContent, 'ai', false, messageTypeClass);
+        }
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    // --- UI & EVENT HANDLERS ---
+    function init() {
+        setupDraggability();
+
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && input.value.trim()) {
+                askAi(input.value.trim());
+                input.value = '';
+            }
+        });
+
+        inspectBtn.addEventListener('click', toggleInspectMode);
+
+        minimizeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            assistant.classList.toggle('minimized');
+        });
+
+        closeBtn.addEventListener('click', () => {
+            assistant.style.display = 'none';
+        });
+
+        clearChatBtn.addEventListener('click', () => {
+            messagesContainer.innerHTML = '';
+            chatHistory = []; // Clear chat history
+            isPrimed = false; // Reset priming flag
+            addMessage("Chat cleared. What can I do for you?", 'ai');
+        });
+
+        settingsBtn.addEventListener('click', () => {
+            apiKeyInput.value = GM_getValue('domAiApiKey', '');
+            settingsModal.style.display = 'flex';
+        });
+
+        saveApiKeyBtn.addEventListener('click', () => {
+            apiKey = apiKeyInput.value.trim();
+            if (apiKey) {
+                GM_setValue('domAiApiKey', apiKey);
+                settingsModal.style.display = 'none';
+                addMessage("API Key saved! I'm ready.", 'ai');
+            } else {
+                alert("Please enter a valid API key.");
+            }
+        });
+
+        clearApiKeyBtn.addEventListener('click', () => {
+            GM_deleteValue('domAiApiKey');
+            apiKey = null;
+            apiKeyInput.value = '';
+            addMessage("API Key cleared.", 'ai');
+        });
+
+        // Close settings modal when clicking outside its content
+        settingsModal.addEventListener('click', (e) => {
+            if (e.target === settingsModal) settingsModal.style.display = 'none';
+        });
+
+        // New listener for tools list button
+        listToolsBtn.addEventListener('click', displayAvailableTools);
+
+        // Initial message based on API key status
+        if (apiKey) {
+            addMessage("DOM-AI Assistant initialized. I'm ready to help!", 'ai');
+        } else {
+            addMessage("Welcome! To get started, please set your Gemini API key in settings (⚙️).", 'ai');
+            settingsModal.style.display = 'flex';
+        }
+    }
+
+    /**
+     * Adds a message to the chat interface.
+     * @param {string} text The message content.
+     * @param {'user'|'ai'} type The type of message (user or AI).
+     * @param {boolean} isThinking Whether to show a thinking indicator.
+     * @param {string} messageTypeClass Additional CSS class for specific message types (e.g., 'tool-call', 'tool-result', 'tool-error').
+     * @returns {HTMLElement} The created message div element.
+     */
+    function addMessage(text, type, isThinking = false, messageTypeClass = '') {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${type}-message ${messageTypeClass}`;
+
+        const icon = (type === 'ai') ? '🤖' : '👤';
+        let contentHtml;
+        if (isThinking) {
+            contentHtml = '<div class="thinking-indicator"><span></span><span></span><span></span></div>';
+        } else {
+            // Allow pre-formatted HTML (like tool calls/results or tool list) to pass through, otherwise escape it.
+            contentHtml = (text.startsWith('<pre>') || text.includes('<div class="tools-list">')) ? text : escapeHtml(text);
+        }
+
+        messageDiv.innerHTML = `<div class="message-icon">${icon}</div><div class="message-content">${contentHtml}</div>`;
+        messagesContainer.appendChild(messageDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        return messageDiv;
+    }
+
+    /**
+     * Escapes HTML special characters in a string to prevent XSS and ensure proper display.
+     * @param {string} unsafe The string to escape.
+     * @returns {string} The escaped string.
+     */
+    function escapeHtml(unsafe) {
+        return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    /**
+     * Sets up the draggability for the assistant window.
+     */
+    function setupDraggability() {
+        let pos = { top: 0, left: 0, x: 0, y: 0 };
+
+        const endDrag = () => {
+            document.onmousemove = null;
+            document.onmouseup = null;
+        };
+
+        const startDrag = (e) => {
+            e.preventDefault();
+            pos = { left: assistant.offsetLeft, top: assistant.offsetTop, x: e.clientX, y: e.clientY };
+            document.onmousemove = (moveEvent) => {
+                moveEvent.preventDefault();
+                const dx = moveEvent.clientX - pos.x;
+                const dy = moveEvent.clientY - pos.y;
+                assistant.style.top = `${pos.top + dy}px`;
+                assistant.style.left = `${pos.left + dx}px`;
+            };
+            document.onmouseup = endDrag;
+        };
+
+        header.onmousedown = startDrag;
+    }
+
+    /**
+     * Toggles the inspect element mode, allowing the user to click elements to get their selector.
+     */
+    function toggleInspectMode() {
+        inspectMode = !inspectMode;
+        inspectBtn.textContent = inspectMode ? 'Exit Inspect' : 'Inspect Element';
+        document.body.style.cursor = inspectMode ? 'crosshair' : '';
+
+        if (inspectMode) {
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('click', handleInspectClick, true); // Use capture phase to intercept click before element's own listeners
+        } else {
+            highlightBox.style.display = 'none';
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('click', handleInspectClick, true);
+        }
+    }
+
+    /**
+     * Handles mouse movement in inspect mode to highlight elements.
+     * @param {MouseEvent} e The mouse event.
+     */
+    function handleMouseMove(e) {
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        // Ensure we don't highlight the assistant itself or the highlight box
+        if (el && !assistant.contains(el) && el.id !== 'highlightBox') {
+            const rect = el.getBoundingClientRect();
+            highlightBox.style.display = 'block';
+            highlightBox.style.left = `${rect.left + window.scrollX}px`;
+            highlightBox.style.top = `${rect.top + window.scrollY}px`;
+            highlightBox.style.width = `${rect.width}px`;
+            highlightBox.style.height = `${rect.height}px`;
+        } else {
+            highlightBox.style.display = 'none';
+        }
+    }
+
+    /**
+     * Handles clicks in inspect mode to get the selector of the clicked element.
+     * @param {MouseEvent} e The click event.
+     */
+    function handleInspectClick(e) {
+        e.preventDefault(); // Prevent default click action (e.g., navigating links)
+        e.stopPropagation(); // Stop propagation to prevent other click listeners on the page
+
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        if (el && !assistant.contains(el) && el.id !== 'highlightBox') {
+            const selector = getSelector(el);
+            input.value = `Tell me about the element with selector: ${selector}`;
+            toggleInspectMode(); // Exit inspect mode after selection
+        }
+    }
+
+    /**
+     * Generates and displays a well-formatted list of all available tools, categorized and with detailed parameters.
+     */
+    function displayAvailableTools() {
+        const categories = {
+            'Core Interaction & DOM Manipulation': [],
+            'Information Retrieval': [],
+            'Browser Navigation & Control': [],
+            'Data & Storage': [],
+            'Advanced / Utilities': []
+        };
+
+        // Categorize tools based on their 'category' property
+        toolDeclarations.forEach(tool => {
+            if (categories[tool.category]) {
+                categories[tool.category].push(tool);
+            } else {
+                // Fallback for uncategorized tools (shouldn't happen if all are categorized)
+                categories['Advanced / Utilities'].push(tool);
+            }
+        });
+
+        let toolsHtml = '<div class="tools-list">'; // Use a div for the scrollable container
+        for (const category in categories) {
+            if (categories[category].length > 0) {
+                toolsHtml += `<h3>${escapeHtml(category)}</h3><ul>`;
+                categories[category].forEach(tool => {
+                    let paramsHtml = '';
+                    if (tool.parameters && tool.parameters.properties && Object.keys(tool.parameters.properties).length > 0) {
+                        paramsHtml = '<div class="tool-params">Parameters:<ul>';
+                        for (const paramName in tool.parameters.properties) {
+                            const param = tool.parameters.properties[paramName];
+                            const isRequired = tool.parameters.required && tool.parameters.required.includes(paramName);
+
+                            let paramDetail = `<li><strong>${escapeHtml(paramName)}</strong>: ${escapeHtml(param.type)}`;
+                            if (!isRequired) {
+                                paramDetail += ' (optional)';
+                            }
+                            if (param.description) {
+                                paramDetail += ` - ${escapeHtml(param.description)}`;
+                            }
+                            if (param.enum) {
+                                paramDetail += ` (Values: ${param.enum.map(v => `"${escapeHtml(String(v))}"`).join(', ')})`;
+                            }
+                            if (param.default !== undefined) {
+                                paramDetail += ` (Default: "${escapeHtml(String(param.default))}")`;
+                            }
+                            paramDetail += '</li>';
+                            paramsHtml += paramDetail;
+                        }
+                        paramsHtml += '</ul></div>';
+                    }
+                    toolsHtml += `
+                        <li>
+                            <strong>${escapeHtml(tool.name)}</strong>
+                            <div class="tool-description">${escapeHtml(tool.description)}</div>
+                            ${paramsHtml}
+                        </li>
+                    `;
+                });
+                toolsHtml += `</ul>`;
+            }
+        }
+        toolsHtml += '</div>'; // Close the tools-list div
+
+        addMessage(`Here is a list of the ${toolDeclarations.length} tools you can use:<br>${toolsHtml}`, 'ai');
+    }
+
+    // --- Start the Assistant ---
+    init();
+})();
