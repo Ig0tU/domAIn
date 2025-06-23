@@ -521,6 +521,170 @@
         return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
     }
 
+    // --- HELPER FUNCTIONS FOR ENHANCED ANALYSIS ---
+    function inferButtonPurpose(button) {
+        const text = (button.textContent || button.value || button.getAttribute('aria-label') || '').toLowerCase();
+        const className = (button.className || '').toLowerCase();
+        const id = (button.id || '').toLowerCase();
+        
+        if (text.includes('submit') || text.includes('send') || text.includes('save') || button.type === 'submit') return 'submit';
+        if (text.includes('cancel') || text.includes('close') || text.includes('dismiss')) return 'cancel';
+        if (text.includes('delete') || text.includes('remove') || text.includes('trash')) return 'delete';
+        if (text.includes('edit') || text.includes('modify') || text.includes('change')) return 'edit';
+        if (text.includes('login') || text.includes('sign in')) return 'login';
+        if (text.includes('logout') || text.includes('sign out')) return 'logout';
+        if (text.includes('register') || text.includes('sign up')) return 'register';
+        if (text.includes('search') || text.includes('find')) return 'search';
+        if (text.includes('next') || text.includes('continue')) return 'navigation';
+        if (text.includes('back') || text.includes('previous')) return 'navigation';
+        if (className.includes('btn-primary') || className.includes('primary')) return 'primary';
+        if (className.includes('btn-secondary') || className.includes('secondary')) return 'secondary';
+        return 'action';
+    }
+
+    function inferInputPurpose(input) {
+        const type = input.type || input.tagName.toLowerCase();
+        const name = (input.name || '').toLowerCase();
+        const placeholder = (input.placeholder || '').toLowerCase();
+        const label = getInputLabel(input).toLowerCase();
+        
+        if (type === 'email' || name.includes('email') || placeholder.includes('email')) return 'email';
+        if (type === 'password' || name.includes('password') || placeholder.includes('password')) return 'password';
+        if (name.includes('search') || placeholder.includes('search')) return 'search';
+        if (name.includes('name') || placeholder.includes('name') || label.includes('name')) return 'name';
+        if (name.includes('phone') || placeholder.includes('phone') || label.includes('phone')) return 'phone';
+        if (name.includes('address') || placeholder.includes('address')) return 'address';
+        if (type === 'checkbox') return 'checkbox';
+        if (type === 'radio') return 'radio';
+        if (type === 'select' || input.tagName === 'SELECT') return 'select';
+        if (input.tagName === 'TEXTAREA') return 'textarea';
+        return 'text';
+    }
+
+    function inferLinkPurpose(link) {
+        const text = link.textContent.toLowerCase();
+        const href = link.href.toLowerCase();
+        
+        if (text.includes('home') || href.includes('/home')) return 'navigation';
+        if (text.includes('about') || href.includes('/about')) return 'navigation';
+        if (text.includes('contact') || href.includes('/contact')) return 'navigation';
+        if (text.includes('login') || href.includes('/login')) return 'authentication';
+        if (text.includes('register') || href.includes('/register')) return 'authentication';
+        if (text.includes('download') || href.includes('download')) return 'download';
+        if (href.includes('mailto:')) return 'email';
+        if (href.includes('tel:')) return 'phone';
+        if (href.startsWith('http') && !href.includes(window.location.hostname)) return 'external';
+        return 'internal';
+    }
+
+    function inferElementPurpose(element) {
+        const tagName = element.tagName.toLowerCase();
+        if (tagName === 'button' || element.type === 'button' || element.type === 'submit') {
+            return inferButtonPurpose(element);
+        }
+        if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
+            return inferInputPurpose(element);
+        }
+        if (tagName === 'a') {
+            return inferLinkPurpose(element);
+        }
+        return 'content';
+    }
+
+    function getInputLabel(input) {
+        // Try to find associated label
+        if (input.id) {
+            const label = document.querySelector(`label[for="${input.id}"]`);
+            if (label) return label.textContent.trim();
+        }
+        
+        // Check if input is inside a label
+        const parentLabel = input.closest('label');
+        if (parentLabel) return parentLabel.textContent.trim();
+        
+        // Check for aria-label
+        if (input.getAttribute('aria-label')) return input.getAttribute('aria-label');
+        
+        // Check for placeholder
+        if (input.placeholder) return input.placeholder;
+        
+        return input.name || '';
+    }
+
+    function generateSynonyms(text, element) {
+        const synonyms = [text];
+        const textLower = text.toLowerCase();
+        
+        // Common synonym mappings
+        const synonymMap = {
+            'submit': ['send', 'post', 'save', 'confirm', 'apply', 'go'],
+            'cancel': ['close', 'dismiss', 'abort', 'back'],
+            'delete': ['remove', 'trash', 'clear', 'erase'],
+            'edit': ['modify', 'change', 'update', 'alter'],
+            'search': ['find', 'lookup', 'query', 'seek'],
+            'login': ['sign in', 'log in', 'signin'],
+            'logout': ['sign out', 'log out', 'signout'],
+            'register': ['sign up', 'signup', 'create account'],
+            'home': ['main', 'index', 'start'],
+            'menu': ['navigation', 'nav', 'options'],
+            'button': ['btn', 'click', 'press'],
+            'link': ['url', 'href', 'anchor'],
+            'input': ['field', 'textbox', 'entry'],
+            'form': ['fields', 'inputs', 'data entry']
+        };
+        
+        // Add synonyms based on mappings
+        Object.keys(synonymMap).forEach(key => {
+            if (textLower.includes(key)) {
+                synonyms.push(...synonymMap[key]);
+            }
+        });
+        
+        // Add variations (remove common words, abbreviations)
+        const variations = [
+            text.replace(/\s+/g, ''), // Remove spaces
+            text.replace(/button|btn/gi, '').trim(), // Remove "button"
+            text.replace(/click|press/gi, '').trim(), // Remove action words
+        ].filter(v => v.length > 0);
+        
+        synonyms.push(...variations);
+        
+        return [...new Set(synonyms)]; // Remove duplicates
+    }
+
+    function hasSemanticMatch(query, text) {
+        const semanticPairs = [
+            ['submit', 'send'], ['cancel', 'close'], ['delete', 'remove'],
+            ['search', 'find'], ['login', 'signin'], ['logout', 'signout'],
+            ['register', 'signup'], ['edit', 'modify'], ['save', 'store'],
+            ['menu', 'navigation'], ['home', 'main'], ['contact', 'reach']
+        ];
+        
+        return semanticPairs.some(pair => 
+            (query.includes(pair[0]) && text.includes(pair[1])) ||
+            (query.includes(pair[1]) && text.includes(pair[0]))
+        );
+    }
+
+    function generateQuerySuggestions(query) {
+        const suggestions = [];
+        const queryLower = query.toLowerCase();
+        
+        // Suggest common UI elements if query doesn't match
+        const commonElements = ['button', 'link', 'input', 'form', 'menu', 'search', 'login', 'submit'];
+        commonElements.forEach(element => {
+            if (!queryLower.includes(element)) {
+                suggestions.push(`Try searching for "${element}"`);
+            }
+        });
+        
+        // Suggest checking specific attributes
+        suggestions.push('Try searching by button text, placeholder text, or link text');
+        suggestions.push('Use more specific terms like "submit button" or "search input"');
+        
+        return suggestions.slice(0, 5);
+    }
+
     // --- AI TOOLS DEFINITIONS ---
     const tools = {
         // Core Interaction & DOM Manipulation
@@ -1471,6 +1635,296 @@
         deleteCookie: (name) => {
             document.cookie = name + '=; Max-Age=-99999999; path=/';
             return { success: true, message: `Cookie '${name}' deleted.` };
+        },
+
+        // --- ENHANCED PAGE ANALYSIS & NATURAL LANGUAGE MAPPING ---
+        analyzePageSemantics: () => {
+            try {
+                const analysis = {
+                    pageStructure: {},
+                    contentCategories: {},
+                    interactionElements: {},
+                    semanticMappings: {},
+                    naturalLanguageIndex: {}
+                };
+
+                // Analyze page structure
+                analysis.pageStructure = {
+                    title: document.title,
+                    url: window.location.href,
+                    domain: window.location.hostname,
+                    hasNavigation: !!document.querySelector('nav, [role="navigation"], .nav, .navbar, .navigation'),
+                    hasHeader: !!document.querySelector('header, [role="banner"], .header'),
+                    hasFooter: !!document.querySelector('footer, [role="contentinfo"], .footer'),
+                    hasSidebar: !!document.querySelector('aside, [role="complementary"], .sidebar'),
+                    hasMainContent: !!document.querySelector('main, [role="main"], .main, .content'),
+                    formCount: document.querySelectorAll('form').length,
+                    linkCount: document.querySelectorAll('a[href]').length,
+                    imageCount: document.querySelectorAll('img').length,
+                    buttonCount: document.querySelectorAll('button, input[type="button"], input[type="submit"]').length
+                };
+
+                // Categorize content elements
+                const contentElements = document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, div, article, section');
+                analysis.contentCategories = {
+                    headings: Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6')).map(el => ({
+                        level: el.tagName.toLowerCase(),
+                        text: el.textContent.trim().substring(0, 100),
+                        selector: getSelector(el)
+                    })),
+                    articles: Array.from(document.querySelectorAll('article, .article, .post, .entry')).map(el => ({
+                        text: el.textContent.trim().substring(0, 200),
+                        selector: getSelector(el)
+                    })),
+                    lists: Array.from(document.querySelectorAll('ul, ol, dl')).map(el => ({
+                        type: el.tagName.toLowerCase(),
+                        itemCount: el.children.length,
+                        selector: getSelector(el)
+                    }))
+                };
+
+                // Identify interaction elements with semantic meaning
+                analysis.interactionElements = {
+                    buttons: Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]')).map(el => ({
+                        text: el.textContent.trim() || el.value || el.getAttribute('aria-label') || 'Button',
+                        type: el.type || 'button',
+                        selector: getSelector(el),
+                        purpose: inferButtonPurpose(el)
+                    })),
+                    inputs: Array.from(document.querySelectorAll('input, textarea, select')).map(el => ({
+                        type: el.type || el.tagName.toLowerCase(),
+                        placeholder: el.placeholder || '',
+                        label: getInputLabel(el),
+                        name: el.name || '',
+                        selector: getSelector(el),
+                        purpose: inferInputPurpose(el)
+                    })),
+                    links: Array.from(document.querySelectorAll('a[href]')).filter(el => isElementVisible(el)).slice(0, 30).map(el => ({
+                        text: el.textContent.trim().substring(0, 100),
+                        href: el.href,
+                        selector: getSelector(el),
+                        purpose: inferLinkPurpose(el)
+                    }))
+                };
+
+                return { 
+                    success: true, 
+                    analysis: analysis, 
+                    message: `Comprehensive page semantic analysis completed. Found ${analysis.interactionElements.buttons.length} buttons, ${analysis.interactionElements.inputs.length} inputs, and ${analysis.interactionElements.links.length} links.` 
+                };
+            } catch (e) {
+                return { success: false, message: `Error analyzing page semantics: ${e.message}` };
+            }
+        },
+
+        buildElementDictionary: () => {
+            try {
+                const dictionary = {
+                    synonymMappings: {},
+                    elementsByPurpose: {},
+                    naturalLanguageIndex: {},
+                    contextualMappings: {}
+                };
+
+                // Build synonym mappings for common UI elements
+                const elements = document.querySelectorAll('button, input, a, [role="button"], [role="link"], [role="textbox"]');
+                
+                elements.forEach(el => {
+                    if (!isElementVisible(el)) return;
+                    
+                    const text = (el.textContent || el.value || el.placeholder || el.getAttribute('aria-label') || '').trim();
+                    const selector = getSelector(el);
+                    
+                    if (text) {
+                        // Generate synonyms and variations
+                        const synonyms = generateSynonyms(text, el);
+                        synonyms.forEach(synonym => {
+                            if (!dictionary.synonymMappings[synonym.toLowerCase()]) {
+                                dictionary.synonymMappings[synonym.toLowerCase()] = [];
+                            }
+                            dictionary.synonymMappings[synonym.toLowerCase()].push({
+                                selector: selector,
+                                originalText: text,
+                                element: el.tagName.toLowerCase(),
+                                confidence: synonym === text ? 1.0 : 0.8
+                            });
+                        });
+
+                        // Index by purpose
+                        const purpose = inferElementPurpose(el);
+                        if (!dictionary.elementsByPurpose[purpose]) {
+                            dictionary.elementsByPurpose[purpose] = [];
+                        }
+                        dictionary.elementsByPurpose[purpose].push({
+                            selector: selector,
+                            text: text,
+                            element: el.tagName.toLowerCase()
+                        });
+                    }
+                });
+
+                return { 
+                    success: true, 
+                    dictionary: dictionary, 
+                    message: `Element dictionary built with ${Object.keys(dictionary.synonymMappings).length} synonym mappings and ${Object.keys(dictionary.elementsByPurpose).length} purpose categories.` 
+                };
+            } catch (e) {
+                return { success: false, message: `Error building element dictionary: ${e.message}` };
+            }
+        },
+
+        resolveNaturalLanguageQuery: (query) => {
+            try {
+                const results = {
+                    exactMatches: [],
+                    partialMatches: [],
+                    semanticMatches: [],
+                    suggestions: []
+                };
+
+                const queryLower = query.toLowerCase();
+                const queryWords = queryLower.split(/\s+/).filter(word => word.length > 2);
+
+                // Search through all visible elements
+                const elements = document.querySelectorAll('*');
+                
+                elements.forEach(el => {
+                    if (!isElementVisible(el) || assistant.contains(el)) return;
+                    
+                    const text = (el.textContent || el.value || el.placeholder || el.getAttribute('aria-label') || '').trim();
+                    const selector = getSelector(el);
+                    
+                    if (text) {
+                        const textLower = text.toLowerCase();
+                        
+                        // Exact match
+                        if (textLower.includes(queryLower)) {
+                            results.exactMatches.push({
+                                selector: selector,
+                                text: text.substring(0, 100),
+                                element: el.tagName.toLowerCase(),
+                                matchType: 'exact',
+                                confidence: 1.0
+                            });
+                        }
+                        // Partial word matches
+                        else if (queryWords.some(word => textLower.includes(word))) {
+                            const matchingWords = queryWords.filter(word => textLower.includes(word));
+                            results.partialMatches.push({
+                                selector: selector,
+                                text: text.substring(0, 100),
+                                element: el.tagName.toLowerCase(),
+                                matchType: 'partial',
+                                matchingWords: matchingWords,
+                                confidence: matchingWords.length / queryWords.length
+                            });
+                        }
+                        // Semantic matches (common synonyms)
+                        else if (hasSemanticMatch(queryLower, textLower)) {
+                            results.semanticMatches.push({
+                                selector: selector,
+                                text: text.substring(0, 100),
+                                element: el.tagName.toLowerCase(),
+                                matchType: 'semantic',
+                                confidence: 0.6
+                            });
+                        }
+                    }
+                });
+
+                // Sort by confidence
+                results.exactMatches.sort((a, b) => b.confidence - a.confidence);
+                results.partialMatches.sort((a, b) => b.confidence - a.confidence);
+                results.semanticMatches.sort((a, b) => b.confidence - a.confidence);
+
+                // Generate suggestions if no good matches
+                if (results.exactMatches.length === 0 && results.partialMatches.length === 0) {
+                    results.suggestions = generateQuerySuggestions(query);
+                }
+
+                return { 
+                    success: true, 
+                    results: results, 
+                    message: `Natural language query resolved. Found ${results.exactMatches.length} exact matches, ${results.partialMatches.length} partial matches, and ${results.semanticMatches.length} semantic matches.` 
+                };
+            } catch (e) {
+                return { success: false, message: `Error resolving natural language query: ${e.message}` };
+            }
+        },
+
+        findElementsByIntent: (intent, context = '') => {
+            try {
+                const intentMappings = {
+                    'submit': ['submit', 'send', 'post', 'save', 'confirm', 'apply', 'go', 'search'],
+                    'cancel': ['cancel', 'close', 'dismiss', 'abort', 'back'],
+                    'delete': ['delete', 'remove', 'trash', 'clear'],
+                    'edit': ['edit', 'modify', 'change', 'update'],
+                    'login': ['login', 'sign in', 'log in', 'signin'],
+                    'logout': ['logout', 'sign out', 'log out', 'signout'],
+                    'register': ['register', 'sign up', 'signup', 'create account'],
+                    'search': ['search', 'find', 'lookup', 'query'],
+                    'navigation': ['menu', 'nav', 'home', 'about', 'contact', 'help'],
+                    'form': ['input', 'field', 'form', 'textbox', 'dropdown', 'checkbox']
+                };
+
+                const results = [];
+                const intentWords = intentMappings[intent.toLowerCase()] || [intent.toLowerCase()];
+                
+                // Search buttons
+                document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]').forEach(el => {
+                    if (!isElementVisible(el)) return;
+                    
+                    const text = (el.textContent || el.value || el.getAttribute('aria-label') || '').toLowerCase();
+                    if (intentWords.some(word => text.includes(word))) {
+                        results.push({
+                            selector: getSelector(el),
+                            text: text,
+                            element: 'button',
+                            intent: intent,
+                            confidence: 0.9
+                        });
+                    }
+                });
+
+                // Search links
+                document.querySelectorAll('a[href]').forEach(el => {
+                    if (!isElementVisible(el)) return;
+                    
+                    const text = el.textContent.toLowerCase();
+                    if (intentWords.some(word => text.includes(word))) {
+                        results.push({
+                            selector: getSelector(el),
+                            text: text,
+                            element: 'link',
+                            intent: intent,
+                            confidence: 0.8
+                        });
+                    }
+                });
+
+                // Search form elements for form-related intents
+                if (intent.toLowerCase() === 'form' || intentWords.includes('input')) {
+                    document.querySelectorAll('input, textarea, select').forEach(el => {
+                        if (!isElementVisible(el)) return;
+                        
+                        results.push({
+                            selector: getSelector(el),
+                            text: el.placeholder || el.name || el.type,
+                            element: el.tagName.toLowerCase(),
+                            intent: intent,
+                            confidence: 0.7
+                        });
+                    });
+                }
+
+                return { 
+                    success: true, 
+                    results: results.slice(0, 20), 
+                    message: `Found ${results.length} elements matching intent: ${intent}` 
+                };
+            } catch (e) {
+                return { success: false, message: `Error finding elements by intent: ${e.message}` };
+            }
         },
 
         // Advanced / Utilities
